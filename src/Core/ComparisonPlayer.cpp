@@ -29,7 +29,7 @@ bool ComparisonPlayer::ReloadFolder() {
     return impl_->ReloadFolder();
 }
 
-std::optional<SequenceExportSnapshot>
+std::optional<ExportSourceSnapshot>
 ComparisonPlayer::CaptureExportSnapshot() const {
     return impl_->CaptureExportSnapshot();
 }
@@ -240,7 +240,7 @@ bool ComparisonPlayer::Impl::BeginPrimaryLoad(const bool accepted) {
     return accepted;
 }
 
-std::optional<SequenceExportSnapshot>
+std::optional<ExportSourceSnapshot>
 ComparisonPlayer::Impl::CaptureExportSnapshot() const {
     return shutdown_ ? std::nullopt : primary_->CaptureExportSnapshot();
 }

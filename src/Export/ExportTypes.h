@@ -19,7 +19,7 @@ struct NormalizedCrop final {
 };
 
 struct FfmpegExportRequest final {
-    SequenceExportSnapshot sequence;
+    ExportSourceSnapshot source;
     NormalizedCrop crop;
     std::filesystem::path outputFolder;
 };

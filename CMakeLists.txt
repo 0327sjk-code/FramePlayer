@@ -131,10 +131,18 @@ if(ZT_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/src/Export/FfmpegExportController.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/Export/FfmpegProcess.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/Export/Image2SequenceInput.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/Imaging/MediaFoundationVideoDecoder.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/Platform/Utf8.cpp"
     )
     target_include_directories(ZTFfmpegExportSmoke PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_link_libraries(ZTFfmpegExportSmoke PRIVATE
+        ole32
+        mfplat
+        mfreadwrite
+        mfuuid
+        propsys
     )
     zt_configure_project_target(ZTFfmpegExportSmoke)
     target_compile_options(ZTFfmpegExportSmoke PRIVATE /WX)

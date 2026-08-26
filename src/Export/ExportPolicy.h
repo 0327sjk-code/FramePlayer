@@ -29,19 +29,33 @@ struct PixelCrop final {
 enum class FfmpegInputKind : std::uint8_t {
     FfconcatManifest,
     Image2Sequence,
+    VideoFile,
 };
 
 // Immutable input contract for every encoding attempt. Image2Sequence uses
 // path as an escaped image2 pattern and startNumber as the first selected file
-// number. FfconcatManifest uses path as the manifest and ignores startNumber.
+// number. FfconcatManifest uses path as the manifest. VideoFile uses path as
+// the original media, startFrame as the first selected source frame, and
+// sourceFramesPerSecond for frame-accurate input seeking.
 struct FfmpegInputSpec final {
     FfmpegInputKind kind = FfmpegInputKind::FfconcatManifest;
     std::filesystem::path path;
     int startNumber = 0;
+    FrameIndex startFrame = 0;
+    double sourceFramesPerSecond = 0.0;
 };
 
 [[nodiscard]] std::optional<std::size_t> CountExportFrames(
     const SequenceExportSnapshot& sequence) noexcept;
+
+[[nodiscard]] std::optional<std::size_t> CountExportFrames(
+    const VideoExportSnapshot& video) noexcept;
+
+[[nodiscard]] std::optional<std::size_t> CountExportFrames(
+    const ExportSourceSnapshot& source) noexcept;
+
+[[nodiscard]] double ExportFramesPerSecond(
+    const ExportSourceSnapshot& source) noexcept;
 
 [[nodiscard]] std::optional<std::uint64_t> CalculateInitialVideoBitRate(
     std::size_t frameCount,

@@ -236,7 +236,7 @@ bool PlayerEngine::Impl::ReloadFolder() {
         std::move(preservedPlaybackRange));
 }
 
-std::optional<SequenceExportSnapshot>
+std::optional<ExportSourceSnapshot>
 PlayerEngine::Impl::CaptureExportSnapshot() const {
     std::shared_ptr<const SourceSession> session;
     PlaybackRange inclusiveRange;
@@ -244,26 +244,44 @@ PlayerEngine::Impl::CaptureExportSnapshot() const {
     {
         std::scoped_lock lock(mutex_);
         if (shutdown_ || pendingLoad_ || !activeSession_ ||
-            activeSession_->kind != SourceKind::PngSequence ||
-            activeSession_->frames.empty()) {
+            activeSession_->kind == SourceKind::None ||
+            activeSession_->TotalFrames() == 0U ||
+            (activeSession_->kind == SourceKind::PngSequence &&
+             activeSession_->frames.empty())) {
             return std::nullopt;
         }
 
         session = activeSession_;
         inclusiveRange = detail::NormalizePlaybackRange(
             playbackRange_,
-            session->frames.size());
+            session->TotalFrames());
         framesPerSecond = settings_.framesPerSecond;
     }
 
     try {
-        SequenceExportSnapshot snapshot;
-        snapshot.sourceGeneration = session->generation;
-        snapshot.sourceFolder = session->sourcePath;
-        snapshot.orderedPngFrames = session->frames;
-        snapshot.inclusiveRange = inclusiveRange;
-        snapshot.framesPerSecond = framesPerSecond;
-        return snapshot;
+        if (session->kind == SourceKind::PngSequence) {
+            SequenceExportSnapshot snapshot;
+            snapshot.sourceGeneration = session->generation;
+            snapshot.sourceFolder = session->sourcePath;
+            snapshot.orderedPngFrames = session->frames;
+            snapshot.inclusiveRange = inclusiveRange;
+            snapshot.framesPerSecond = framesPerSecond;
+            return ExportSourceSnapshot{std::move(snapshot)};
+        }
+        if (session->kind == SourceKind::Video) {
+            VideoExportSnapshot snapshot;
+            snapshot.sourceGeneration = session->generation;
+            snapshot.sourceFile = session->sourcePath;
+            snapshot.inclusiveRange = inclusiveRange;
+            snapshot.sourceFramesPerSecond =
+                session->videoMetadata.framesPerSecond;
+            snapshot.framesPerSecond = framesPerSecond;
+            snapshot.totalFrames = session->videoMetadata.frameCount;
+            snapshot.sourceWidth = session->videoMetadata.width;
+            snapshot.sourceHeight = session->videoMetadata.height;
+            return ExportSourceSnapshot{std::move(snapshot)};
+        }
+        return std::nullopt;
     } catch (...) {
         // Copying thousands of filesystem paths can fail under severe memory
         // pressure. Treat that as an unavailable snapshot and leave engine

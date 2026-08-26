@@ -153,6 +153,39 @@ std::optional<std::size_t> CountExportFrames(
     return (end - start) + 1U;
 }
 
+std::optional<std::size_t> CountExportFrames(
+    const VideoExportSnapshot& video) noexcept {
+    if (video.sourceFile.empty() || video.totalFrames == 0U ||
+        video.sourceWidth < 2U || video.sourceHeight < 2U ||
+        !std::isfinite(video.sourceFramesPerSecond) ||
+        video.sourceFramesPerSecond <= 0.0 ||
+        !std::isfinite(video.framesPerSecond) ||
+        video.framesPerSecond <= 0.0) {
+        return std::nullopt;
+    }
+
+    const std::size_t start = video.inclusiveRange.startFrame;
+    const std::size_t end = video.inclusiveRange.endFrame;
+    if (start > end || end >= video.totalFrames) {
+        return std::nullopt;
+    }
+    return (end - start) + 1U;
+}
+
+std::optional<std::size_t> CountExportFrames(
+    const ExportSourceSnapshot& source) noexcept {
+    return std::visit(
+        [](const auto& value) { return CountExportFrames(value); },
+        source);
+}
+
+double ExportFramesPerSecond(
+    const ExportSourceSnapshot& source) noexcept {
+    return std::visit(
+        [](const auto& value) { return value.framesPerSecond; },
+        source);
+}
+
 std::optional<std::uint64_t> CalculateInitialVideoBitRate(
     const std::size_t frameCount,
     const double framesPerSecond) noexcept {
@@ -295,6 +328,13 @@ std::vector<std::wstring> BuildFfmpegArguments(
     const std::uint32_t sourceWidth,
     const std::uint32_t sourceHeight) {
     std::wstring filter;
+    if (input.kind == FfmpegInputKind::VideoFile) {
+        filter.append(L"trim=end_frame=");
+        filter.append(ToWideSize(frameCount));
+        filter.append(L",setpts=N/(");
+        filter.append(ToWideNumber(framesPerSecond));
+        filter.append(L"*TB),");
+    }
     if (!IsFullFrameCrop(crop, sourceWidth, sourceHeight)) {
         filter.append(L"crop=");
         filter.append(std::to_wstring(crop.width));
@@ -306,10 +346,13 @@ std::vector<std::wstring> BuildFfmpegArguments(
         filter.append(std::to_wstring(crop.y));
         filter.push_back(L',');
     }
-    filter.append(
-        L"scale=in_range=pc:out_range=tv:out_color_matrix=bt709,"
-        L"format=nv12,setparams=range=limited:color_primaries=bt709:"
-        L"color_trc=bt709:colorspace=bt709");
+    filter.append(input.kind == FfmpegInputKind::VideoFile
+        ? L"scale=in_range=auto:out_range=tv:out_color_matrix=bt709,"
+          L"format=nv12,setparams=range=limited:color_primaries=bt709:"
+          L"color_trc=bt709:colorspace=bt709"
+        : L"scale=in_range=pc:out_range=tv:out_color_matrix=bt709,"
+          L"format=nv12,setparams=range=limited:color_primaries=bt709:"
+          L"color_trc=bt709:colorspace=bt709");
 
     std::vector<std::wstring> arguments{
         L"-hide_banner",
@@ -328,7 +371,7 @@ std::vector<std::wstring> BuildFfmpegArguments(
                 L"-start_number_range", L"1",
                 L"-i", input.path.wstring(),
             });
-    } else {
+    } else if (input.kind == FfmpegInputKind::FfconcatManifest) {
         arguments.insert(
             arguments.end(),
             {
@@ -336,6 +379,19 @@ std::vector<std::wstring> BuildFfmpegArguments(
                 L"-safe", L"0",
                 L"-i", input.path.wstring(),
             });
+    } else {
+        arguments.insert(arguments.end(), {L"-threads", L"0"});
+        if (input.startFrame > 0U) {
+            const double seekSeconds =
+                static_cast<double>(input.startFrame) /
+                input.sourceFramesPerSecond;
+            arguments.insert(
+                arguments.end(),
+                {L"-ss", ToWideNumber(seekSeconds)});
+        }
+        arguments.insert(
+            arguments.end(),
+            {L"-i", input.path.wstring(), L"-map", L"0:v:0"});
     }
 
     arguments.insert(
@@ -346,6 +402,10 @@ std::vector<std::wstring> BuildFfmpegArguments(
         L"-c:v", L"hevc_nvenc",
         L"-preset", L"p5",
         L"-tune", L"hq",
+        });
+    arguments.insert(
+        arguments.end(),
+        {
         L"-profile:v", L"main",
         L"-tag:v", L"hvc1",
         L"-rc", L"cbr",

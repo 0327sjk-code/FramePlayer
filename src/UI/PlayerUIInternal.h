@@ -288,7 +288,8 @@ private:
     void StartExport(
         ComparisonPlayer& player,
         exporting::FfmpegExportController& exporter);
-    [[nodiscard]] exporting::NormalizedCrop CurrentExportCrop() const noexcept;
+    [[nodiscard]] exporting::NormalizedCrop CurrentExportCrop(
+        const ComparisonPlayerSnapshot& snapshot) const noexcept;
 
     void HandleKeyboard(
         ComparisonPlayer& player,

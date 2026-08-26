@@ -12,6 +12,7 @@ namespace {
 
 using zt::sequence::PlayerEngine;
 using zt::sequence::PlayerSnapshot;
+using zt::sequence::VideoExportSnapshot;
 
 [[nodiscard]] bool WaitFor(
     PlayerEngine& engine,
@@ -72,9 +73,27 @@ int wmain(const int argumentCount, wchar_t** arguments) {
         snapshot.targetFramesPerSecond > 59.99 &&
             snapshot.targetFramesPerSecond < 60.01,
         "video native fps");
+    const auto initialExportSnapshot = engine.CaptureExportSnapshot();
+    const VideoExportSnapshot* const initialVideoExport = initialExportSnapshot
+        ? std::get_if<VideoExportSnapshot>(&*initialExportSnapshot)
+        : nullptr;
     passed &= Expect(
-        !engine.CaptureExportSnapshot().has_value(),
-        "video export disabled");
+        initialVideoExport != nullptr,
+        "video export snapshot available");
+    if (initialVideoExport != nullptr) {
+        passed &= Expect(
+            initialVideoExport->sourceFile == videoFile.lexically_normal() &&
+                initialVideoExport->inclusiveRange.startFrame == 0U &&
+                initialVideoExport->inclusiveRange.endFrame + 1U ==
+                    initialVideoExport->totalFrames,
+            "video export snapshot captures source and full range");
+        passed &= Expect(
+            initialVideoExport->sourceWidth == snapshot.sourceWidth &&
+                initialVideoExport->sourceHeight == snapshot.sourceHeight &&
+                initialVideoExport->sourceFramesPerSecond > 59.99 &&
+                initialVideoExport->sourceFramesPerSecond < 60.01,
+            "video export snapshot captures native metadata");
+    }
     if (!passed || snapshot.totalFrames < 32U) {
         engine.Shutdown();
         return 1;
@@ -221,6 +240,16 @@ int wmain(const int argumentCount, wchar_t** arguments) {
     passed &= Expect(
         snapshot.memoryLimitBytes == 1ULL * kBytesPerGiB,
         "video memory target is configurable");
+
+    const auto rangedExportSnapshot = engine.CaptureExportSnapshot();
+    const VideoExportSnapshot* const rangedVideoExport = rangedExportSnapshot
+        ? std::get_if<VideoExportSnapshot>(&*rangedExportSnapshot)
+        : nullptr;
+    passed &= Expect(
+        rangedVideoExport != nullptr &&
+            rangedVideoExport->inclusiveRange.startFrame == rangeStart &&
+            rangedVideoExport->inclusiveRange.endFrame == rangeEnd,
+        "video export snapshot preserves custom inclusive range");
 
     const Generation preservedGeneration = snapshot.generation;
     passed &= Expect(

@@ -14,6 +14,7 @@ namespace {
 
 using namespace std::chrono_literals;
 using zt::sequence::FrameRequestKind;
+using zt::sequence::ExportSourceSnapshot;
 using zt::sequence::PlayerEngine;
 using zt::sequence::PlayerSnapshot;
 using zt::sequence::ScrubUpdateResult;
@@ -167,35 +168,41 @@ int main() {
 
     engine.SetPlaybackRange(1U, 2U);
     engine.SetFramesPerSecond(48.0);
-    const std::optional<SequenceExportSnapshot> captured =
+    const std::optional<ExportSourceSnapshot> captured =
         engine.CaptureExportSnapshot();
     passed &= Expect(captured.has_value(), "capture immutable export snapshot");
-    if (captured) {
+    const SequenceExportSnapshot* const capturedSequence = captured
+        ? std::get_if<SequenceExportSnapshot>(&*captured)
+        : nullptr;
+    passed &= Expect(
+        capturedSequence != nullptr,
+        "sequence source captures a sequence export snapshot");
+    if (capturedSequence != nullptr) {
         passed &= Expect(
-            captured->sourceGeneration == playerSnapshot.generation,
+            capturedSequence->sourceGeneration == playerSnapshot.generation,
             "snapshot generation matches committed session");
         passed &= Expect(
-            captured->orderedPngFrames.size() == 3U,
+            capturedSequence->orderedPngFrames.size() == 3U,
             "snapshot contains complete PNG file list");
         passed &= Expect(
-            captured->orderedPngFrames[0].relativePath == L"Frame.1.png" &&
-                captured->orderedPngFrames[1].relativePath == L"Frame.2.png" &&
-                captured->orderedPngFrames[2].relativePath == L"Frame.10.png",
+            capturedSequence->orderedPngFrames[0].relativePath == L"Frame.1.png" &&
+                capturedSequence->orderedPngFrames[1].relativePath == L"Frame.2.png" &&
+                capturedSequence->orderedPngFrames[2].relativePath == L"Frame.10.png",
             "snapshot preserves natural numeric order");
         passed &= Expect(
-            captured->inclusiveRange.startFrame == 1U &&
-                captured->inclusiveRange.endFrame == 2U,
+            capturedSequence->inclusiveRange.startFrame == 1U &&
+                capturedSequence->inclusiveRange.endFrame == 2U,
             "snapshot captures inclusive playback range");
         passed &= Expect(
-            captured->framesPerSecond == 48.0,
+            capturedSequence->framesPerSecond == 48.0,
             "snapshot captures fixed export frame rate");
 
         engine.SetPlaybackRange(0U, 0U);
         engine.SetFramesPerSecond(60.0);
         passed &= Expect(
-            captured->inclusiveRange.startFrame == 1U &&
-                captured->inclusiveRange.endFrame == 2U &&
-                captured->framesPerSecond == 48.0,
+            capturedSequence->inclusiveRange.startFrame == 1U &&
+                capturedSequence->inclusiveRange.endFrame == 2U &&
+                capturedSequence->framesPerSecond == 48.0,
             "captured request is unaffected by later engine settings");
     }
 

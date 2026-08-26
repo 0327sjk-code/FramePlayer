@@ -4,6 +4,7 @@
 #include "Export/FfmpegExportController.h"
 #include "Platform/UserSettings.h"
 #include "Platform/Utf8.h"
+#include "UI/ComparisonCanvasLayout.h"
 #include "UI/PlayerUILogic.h"
 
 #include <algorithm>
@@ -14,6 +15,7 @@
 #include <sstream>
 #include <string>
 #include <system_error>
+#include <type_traits>
 #include <utility>
 
 namespace zt::sequence {
@@ -50,6 +52,25 @@ namespace {
         state == exporting::ExportState::Running ||
         state == exporting::ExportState::Retrying ||
         state == exporting::ExportState::Cancelling;
+}
+
+[[nodiscard]] bool IsExportableSourceKind(
+    const SourceKind kind) noexcept {
+    return kind == SourceKind::PngSequence || kind == SourceKind::Video;
+}
+
+[[nodiscard]] std::filesystem::path DefaultExportFolder(
+    const ExportSourceSnapshot& source) {
+    return std::visit(
+        [](const auto& value) {
+            using Snapshot = std::decay_t<decltype(value)>;
+            if constexpr (std::is_same_v<Snapshot, SequenceExportSnapshot>) {
+                return value.sourceFolder;
+            } else {
+                return value.sourceFile.parent_path();
+            }
+        },
+        source);
 }
 
 [[nodiscard]] const char* ExportProgressLabel(
@@ -907,8 +928,8 @@ void PlayerUI::Impl::RenderExportControls(
     ImGui::TableNextRow(ImGuiTableRowFlags_None, Scale(kControlHeight));
 
     const bool exportBusy = IsExportBusy(exportProgress.state);
-    const bool canExportSequence =
-        snapshot.sourceKind == SourceKind::PngSequence;
+    const bool canExportMedia = IsExportableSourceKind(snapshot.sourceKind);
+    const bool exportingVideo = snapshot.sourceKind == SourceKind::Video;
     ImGui::TableSetColumnIndex(0);
     ImGui::BeginDisabled(exportBusy || !actions.chooseExportFolder);
     if (AnimatedButton(
@@ -918,10 +939,12 @@ void PlayerUI::Impl::RenderExportControls(
         ChooseExportFolder(actions);
     }
     ImGui::EndDisabled();
-    const std::string folderTooltip = !canExportSequence
-        ? "仅 PNG 序列支持导出 MP4"
+    const std::string folderTooltip = !canExportMedia
+        ? "请先打开 PNG 序列或视频"
         : exportFolder_.has_value()
         ? WideToUtf8(exportFolder_->wstring())
+        : exportingVideo
+        ? "未设置自定义位置；导出时使用当前视频所在文件夹"
         : "未设置自定义位置；导出时使用当前 PNG 文件夹";
     TooltipForLastItem(folderTooltip.c_str());
 
@@ -931,10 +954,12 @@ void PlayerUI::Impl::RenderExportControls(
         std::max(
             0.0F,
             (Scale(kControlHeight) - ImGui::GetTextLineHeight()) * 0.5F));
-    const std::string folderLabel = !canExportSequence
-        ? "仅 PNG 序列"
+    const std::string folderLabel = !canExportMedia
+        ? "等待来源"
         : exportFolder_.has_value()
         ? PathDisplayName(*exportFolder_)
+        : exportingVideo
+        ? "视频同目录"
         : "PNG 同目录";
     EllipsizedText(
         folderLabel.c_str(),
@@ -944,7 +969,7 @@ void PlayerUI::Impl::RenderExportControls(
 
     ImGui::TableSetColumnIndex(2);
     ImGui::BeginDisabled(
-        exportBusy || !canExportSequence || snapshot.loading);
+        exportBusy || !canExportMedia || snapshot.loading);
     if (PrimaryButton(
             interactionAnimator_,
             "导出 MP4",
@@ -952,9 +977,11 @@ void PlayerUI::Impl::RenderExportControls(
         StartExport(player, exporter);
     }
     ImGui::EndDisabled();
-    TooltipForLastItem(canExportSequence
-        ? "使用原始 PNG，并继承当前遮罩、播放范围和 FPS；预览解码比例不影响导出"
-        : "仅 PNG 序列支持导出 MP4");
+    TooltipForLastItem(!canExportMedia
+        ? "请先打开 PNG 序列或视频"
+        : exportingVideo
+        ? "裁剪原始视频，并继承当前遮罩、播放范围和 FPS；预览解码比例不影响导出"
+        : "使用原始 PNG，并继承当前遮罩、播放范围和 FPS；预览解码比例不影响导出");
 
     const bool hasSuccessfulExport = !lastSuccessfulExportPath_.empty();
     const bool exportedFileExists = IsLastExportedVideoAvailable();
@@ -1112,17 +1139,18 @@ void PlayerUI::Impl::StartExport(
     ComparisonPlayer& player,
     exporting::FfmpegExportController& exporter) {
     exportUiError_.clear();
-    std::optional<SequenceExportSnapshot> sequence =
+    std::optional<ExportSourceSnapshot> source =
         player.CaptureExportSnapshot();
-    if (!sequence.has_value()) {
-        exportUiError_ = "当前序列尚未准备好，无法开始导出";
+    if (!source.has_value()) {
+        exportUiError_ = "当前媒体尚未准备好，无法开始导出";
         return;
     }
 
     exporting::FfmpegExportRequest request;
-    request.outputFolder = exportFolder_.value_or(sequence->sourceFolder);
-    request.crop = CurrentExportCrop();
-    request.sequence = std::move(*sequence);
+    request.outputFolder = exportFolder_.value_or(
+        DefaultExportFolder(*source));
+    request.crop = CurrentExportCrop(player.Snapshot());
+    request.source = std::move(*source);
     if (!exporter.Start(std::move(request))) {
         const exporting::ExportProgressSnapshot progress = exporter.Snapshot();
         exportUiError_ = !progress.errorUtf8.empty()
@@ -1135,9 +1163,25 @@ void PlayerUI::Impl::StartExport(
     }
 }
 
-exporting::NormalizedCrop PlayerUI::Impl::CurrentExportCrop() const noexcept {
+exporting::NormalizedCrop PlayerUI::Impl::CurrentExportCrop(
+    const ComparisonPlayerSnapshot& snapshot) const noexcept {
     const ui::NormalizedMaskOpening opening =
         ui::MaskOpeningForPreset(maskPreset_);
+    if (snapshot.enabled) {
+        const ui_detail::ComparisonCanvasLayout layout =
+            ui_detail::CalculateComparisonCanvasLayout(
+                snapshot.primary.sourceWidth,
+                snapshot.primary.sourceHeight,
+                opening);
+        if (layout.hasVisibleContent) {
+            return {
+                static_cast<double>(layout.sourceUv.minimumX),
+                static_cast<double>(layout.sourceUv.minimumY),
+                static_cast<double>(layout.sourceUv.maximumX),
+                static_cast<double>(layout.sourceUv.maximumY),
+            };
+        }
+    }
     return {
         static_cast<double>(opening.minimumX),
         static_cast<double>(opening.minimumY),

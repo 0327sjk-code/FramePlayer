@@ -246,11 +246,12 @@ public:
         }
 
         const std::uint64_t jobId = NextExportJobId();
-        const auto frameCount = CountExportFrames(request.sequence);
+        const auto frameCount = CountExportFrames(request.source);
+        const double framesPerSecond = ExportFramesPerSecond(request.source);
         const auto initialBitRate = frameCount
             ? CalculateInitialVideoBitRate(
                   *frameCount,
-                  request.sequence.framesPerSecond)
+                  framesPerSecond)
             : std::nullopt;
         if (!frameCount || !initialBitRate || request.outputFolder.empty()) {
             std::scoped_lock stateLock(stateMutex_);
@@ -260,7 +261,7 @@ public:
             progress_.statusUtf8 = "无法开始导出";
             progress_.errorUtf8 = request.outputFolder.empty()
                 ? "导出目录为空"
-                : "序列范围或帧率无效";
+                : "媒体范围或帧率无效";
             return false;
         }
 
@@ -474,33 +475,50 @@ private:
                 return;
             }
 
-            const auto frameCount = CountExportFrames(request.sequence);
+            const auto frameCount = CountExportFrames(request.source);
+            const double framesPerSecond =
+                ExportFramesPerSecond(request.source);
             const auto initialBitRate = frameCount
                 ? CalculateInitialVideoBitRate(
                       *frameCount,
-                      request.sequence.framesPerSecond)
+                      framesPerSecond)
                 : std::nullopt;
             if (!frameCount || !initialBitRate) {
                 finishFailed("导出范围或帧率无效");
                 return;
             }
-            const std::optional<Image2SequenceInput> image2Input =
-                DetectImage2SequenceInput(request.sequence);
-
-            const std::size_t firstFrameIndex =
-                request.sequence.inclusiveRange.startFrame;
-            std::string dimensionsError;
-            const auto dimensions = ReadPngDimensions(
-                request.sequence.orderedPngFrames[firstFrameIndex].path,
-                dimensionsError);
-            if (!dimensions) {
-                finishFailed(std::move(dimensionsError));
+            const SequenceExportSnapshot* const sequence =
+                std::get_if<SequenceExportSnapshot>(&request.source);
+            const VideoExportSnapshot* const video =
+                std::get_if<VideoExportSnapshot>(&request.source);
+            std::optional<Image2SequenceInput> image2Input;
+            std::uint32_t sourceWidth = 0U;
+            std::uint32_t sourceHeight = 0U;
+            if (sequence != nullptr) {
+                image2Input = DetectImage2SequenceInput(*sequence);
+                const std::size_t firstFrameIndex =
+                    sequence->inclusiveRange.startFrame;
+                std::string dimensionsError;
+                const auto dimensions = ReadPngDimensions(
+                    sequence->orderedPngFrames[firstFrameIndex].path,
+                    dimensionsError);
+                if (!dimensions) {
+                    finishFailed(std::move(dimensionsError));
+                    return;
+                }
+                sourceWidth = dimensions->width;
+                sourceHeight = dimensions->height;
+            } else if (video != nullptr) {
+                sourceWidth = video->sourceWidth;
+                sourceHeight = video->sourceHeight;
+            } else {
+                finishFailed("导出媒体类型无效");
                 return;
             }
             const auto pixelCrop = ResolvePixelCrop(
                 request.crop,
-                dimensions->width,
-                dimensions->height);
+                sourceWidth,
+                sourceHeight);
             if (!pixelCrop) {
                 finishFailed("遮罩裁切范围无效");
                 return;
@@ -521,11 +539,11 @@ private:
                 jobId,
                 L".mp4");
             FfmpegInputSpec frozenInput;
-            if (image2Input) {
+            if (sequence != nullptr && image2Input) {
                 frozenInput.kind = FfmpegInputKind::Image2Sequence;
                 frozenInput.path = image2Input->patternPath;
                 frozenInput.startNumber = image2Input->startNumber;
-            } else {
+            } else if (sequence != nullptr) {
                 temporaryFiles.manifest = BuildTemporaryPath(
                     proposedFinalPath,
                     L"manifest",
@@ -533,6 +551,12 @@ private:
                     L".ffconcat");
                 frozenInput.kind = FfmpegInputKind::FfconcatManifest;
                 frozenInput.path = temporaryFiles.manifest;
+            } else {
+                frozenInput.kind = FfmpegInputKind::VideoFile;
+                frozenInput.path = video->sourceFile;
+                frozenInput.startFrame = video->inclusiveRange.startFrame;
+                frozenInput.sourceFramesPerSecond =
+                    video->sourceFramesPerSecond;
             }
 
             {
@@ -552,7 +576,7 @@ private:
                 std::string manifestError;
                 if (!WriteFfconcatManifest(
                         temporaryFiles.manifest,
-                        request.sequence,
+                        *sequence,
                         manifestError)) {
                     finishFailed(std::move(manifestError));
                     return;
@@ -579,11 +603,11 @@ private:
                     frozenInput,
                     temporaryFiles.part,
                     *frameCount,
-                    request.sequence.framesPerSecond,
+                    framesPerSecond,
                     videoBitRate,
                     *pixelCrop,
-                    dimensions->width,
-                    dimensions->height);
+                    sourceWidth,
+                    sourceHeight);
 
                 const FfmpegProcessResult processResult = process_.Run(
                     *ffmpegPath,

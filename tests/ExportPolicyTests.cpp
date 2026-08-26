@@ -15,6 +15,7 @@ namespace {
 
 using zt::sequence::FrameFile;
 using zt::sequence::SequenceExportSnapshot;
+using zt::sequence::VideoExportSnapshot;
 using zt::sequence::exporting::NormalizedCrop;
 using zt::sequence::exporting::PixelCrop;
 
@@ -112,6 +113,28 @@ int main() {
     passed &= Expect(
         !CountExportFrames(invalidRange).has_value(),
         "range beyond ordered PNG list is rejected");
+
+    VideoExportSnapshot video;
+    video.sourceFile = L"D:\\参考\\reference.mp4";
+    video.inclusiveRange = {600U, 1200U};
+    video.sourceFramesPerSecond = 60.0;
+    video.framesPerSecond = 30.0;
+    video.totalFrames = 3619U;
+    video.sourceWidth = 1920U;
+    video.sourceHeight = 1920U;
+    passed &= Expect(
+        CountExportFrames(video) == 601U,
+        "video range exports end-start+1 frames");
+    VideoExportSnapshot invalidVideo = video;
+    invalidVideo.inclusiveRange = {1200U, 600U};
+    passed &= Expect(
+        !CountExportFrames(invalidVideo).has_value(),
+        "crossed video range is rejected");
+    invalidVideo = video;
+    invalidVideo.inclusiveRange.endFrame = 3619U;
+    passed &= Expect(
+        !CountExportFrames(invalidVideo).has_value(),
+        "video range beyond source frame count is rejected");
 
     const auto sixtyFpsBitRate = CalculateInitialVideoBitRate(3000U, 60.0);
     passed &= Expect(
@@ -298,6 +321,51 @@ int main() {
             !ArgumentValue(fullFrameArguments, L"-pattern_type").has_value() &&
             !ArgumentValue(fullFrameArguments, L"-threads").has_value(),
         "non-contiguous input safely falls back to the concat contract");
+
+    const FfmpegInputSpec videoInput{
+        FfmpegInputKind::VideoFile,
+        video.sourceFile,
+        0,
+        600U,
+        60.0,
+    };
+    const std::vector<std::wstring> videoArguments = BuildFfmpegArguments(
+        videoInput,
+        L"D:\\导出\\视频.part.mp4",
+        601U,
+        30.0,
+        11'500'000ULL,
+        exactCrop,
+        1920U,
+        1920U);
+    passed &= Expect(
+        ArgumentValue(videoArguments, L"-threads") == L"0" &&
+            ArgumentValue(videoArguments, L"-ss") == L"10" &&
+            ArgumentValue(videoArguments, L"-i") == video.sourceFile.wstring() &&
+            !ArgumentValue(videoArguments, L"-f").has_value() &&
+            !ArgumentValue(videoArguments, L"-pattern_type").has_value(),
+        "video input uses fast frame-aligned seeking without image demuxers");
+    passed &= Expect(
+        ArgumentValue(videoArguments, L"-frames:v") == L"601" &&
+            ArgumentValue(videoArguments, L"-r") == L"30" &&
+            ArgumentValue(videoArguments, L"-fps_mode") == L"cfr",
+        "video export preserves selected source frames at the current player FPS");
+    const auto videoFilter = ArgumentValue(videoArguments, L"-vf");
+    passed &= Expect(
+        videoFilter.has_value() &&
+            *videoFilter ==
+                L"trim=end_frame=601,setpts=N/(30*TB),"
+                L"crop=1080:1080:420:420,"
+                L"scale=in_range=auto:out_range=tv:out_color_matrix=bt709,"
+                L"format=nv12,setparams=range=limited:color_primaries=bt709:"
+                L"color_trc=bt709:colorspace=bt709",
+        "video filter trims exactly and preserves input-aware BT.709 levels");
+    passed &= Expect(
+        ArgumentValue(videoArguments, L"-preset") == L"p5" &&
+            !ArgumentValue(videoArguments, L"-spatial_aq").has_value() &&
+            !ArgumentValue(videoArguments, L"-temporal_aq").has_value() &&
+            !ArgumentValue(videoArguments, L"-multipass").has_value(),
+        "video input keeps the measured fast high-quality NVENC path");
 
     return passed ? 0 : 1;
 }

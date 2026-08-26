@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <variant>
 #include <vector>
 
 namespace zt::sequence {
@@ -73,6 +74,25 @@ struct SequenceExportSnapshot final {
     PlaybackRange inclusiveRange;
     double framesPerSecond = kDefaultFramesPerSecond;
 };
+
+// Immutable-by-value video description for an export job. The playback range
+// is inclusive and indexes decoded source frames. sourceFramesPerSecond keeps
+// seeking tied to the original media timeline, while framesPerSecond is the
+// current player rate used for the exported clip.
+struct VideoExportSnapshot final {
+    Generation sourceGeneration = 0;
+    std::filesystem::path sourceFile;
+    PlaybackRange inclusiveRange;
+    double sourceFramesPerSecond = 0.0;
+    double framesPerSecond = kDefaultFramesPerSecond;
+    std::size_t totalFrames = 0;
+    std::uint32_t sourceWidth = 0;
+    std::uint32_t sourceHeight = 0;
+};
+
+using ExportSourceSnapshot = std::variant<
+    SequenceExportSnapshot,
+    VideoExportSnapshot>;
 
 struct DecodedFrame {
     FrameIndex index = 0;

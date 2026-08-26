@@ -40,7 +40,7 @@ public:
     [[nodiscard]] bool LoadFolder(const std::filesystem::path& folder);
     [[nodiscard]] bool LoadSource(const std::filesystem::path& sourcePath);
     [[nodiscard]] bool ReloadFolder();
-    [[nodiscard]] std::optional<SequenceExportSnapshot> CaptureExportSnapshot() const;
+    [[nodiscard]] std::optional<ExportSourceSnapshot> CaptureExportSnapshot() const;
     void Tick(double elapsedSeconds);
     void SetExternalClockEnabled(bool enabled);
     void RequestFrame(

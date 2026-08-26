@@ -1,6 +1,7 @@
 #include "Core/SequenceScanner.h"
 #include "Export/ExportTypes.h"
 #include "Export/FfmpegExportController.h"
+#include "Imaging/MediaFoundationVideoDecoder.h"
 #include "Platform/Utf8.h"
 
 #include <chrono>
@@ -18,6 +19,7 @@ namespace {
 
 using zt::sequence::FrameIndex;
 using zt::sequence::SequenceExportSnapshot;
+using zt::sequence::VideoExportSnapshot;
 using zt::sequence::exporting::ExportProgressSnapshot;
 using zt::sequence::exporting::ExportState;
 using zt::sequence::exporting::NormalizedCrop;
@@ -113,13 +115,13 @@ void PrintProgress(const ExportProgressSnapshot& progress) {
 int wmain(const int argumentCount, wchar_t** arguments) {
     if (argumentCount < 3 || argumentCount > 8) {
         std::cerr
-            << "usage: ZTFfmpegExportSmoke <source-folder> <output-folder> "
+            << "usage: ZTFfmpegExportSmoke <source-path> <output-folder> "
                "[none|1080x1080|1920x1080|1080x1920|864x1080] "
                "[start-index] [end-index] [fps] [cancel-after-ms]\n";
         return 2;
     }
 
-    const std::filesystem::path sourceFolder(arguments[1]);
+    const std::filesystem::path sourcePath(arguments[1]);
     const std::filesystem::path outputFolder(arguments[2]);
     const std::wstring_view cropName = argumentCount >= 4
         ? std::wstring_view(arguments[3])
@@ -130,19 +132,41 @@ int wmain(const int argumentCount, wchar_t** arguments) {
         return 3;
     }
 
-    zt::sequence::SequenceScanResult scan =
-        zt::sequence::ScanPngFolder(sourceFolder);
-    if (!scan) {
-        std::cerr << scan.errorUtf8 << '\n';
-        return 4;
+    std::optional<zt::sequence::SequenceScanResult> scan;
+    std::optional<zt::sequence::VideoProbeResult> videoProbe;
+    std::size_t sourceFrameCount = 0U;
+    double defaultFramesPerSecond = 60.0;
+    std::error_code sourceError;
+    if (std::filesystem::is_directory(sourcePath, sourceError) &&
+        !sourceError) {
+        scan = zt::sequence::ScanPngFolder(sourcePath);
+        if (!*scan) {
+            std::cerr << scan->errorUtf8 << '\n';
+            return 4;
+        }
+        sourceFrameCount = scan->frames.size();
+    } else {
+        sourceError.clear();
+        if (!std::filesystem::is_regular_file(sourcePath, sourceError) ||
+            sourceError) {
+            std::cerr << "source path is not a PNG directory or video file\n";
+            return 4;
+        }
+        videoProbe = zt::sequence::ProbeVideoFile(sourcePath);
+        if (!*videoProbe) {
+            std::cerr << videoProbe->errorUtf8 << '\n';
+            return 4;
+        }
+        sourceFrameCount = videoProbe->metadata.frameCount;
+        defaultFramesPerSecond = videoProbe->metadata.framesPerSecond;
     }
-    if (scan.frames.size() >
+    if (sourceFrameCount == 0U || sourceFrameCount >
         static_cast<std::size_t>(std::numeric_limits<FrameIndex>::max())) {
         std::cerr << "too many frames\n";
         return 5;
     }
 
-    const std::size_t defaultEnd = scan.frames.size() - 1U;
+    const std::size_t defaultEnd = sourceFrameCount - 1U;
     const auto start = argumentCount >= 5
         ? ParseIndex(arguments[4])
         : std::optional<std::size_t>(0U);
@@ -151,14 +175,14 @@ int wmain(const int argumentCount, wchar_t** arguments) {
         : std::optional<std::size_t>(defaultEnd);
     const auto framesPerSecond = argumentCount >= 7
         ? ParseFramesPerSecond(arguments[6])
-        : std::optional<double>(60.0);
+        : std::optional<double>(defaultFramesPerSecond);
     const auto cancelAfterMilliseconds = argumentCount >= 8
         ? ParseIndex(arguments[7])
         : std::optional<std::size_t>{};
     if (!start || !end || !framesPerSecond ||
         (argumentCount >= 8 && !cancelAfterMilliseconds) ||
         *start > *end ||
-        *end >= scan.frames.size()) {
+        *end >= sourceFrameCount) {
         std::cerr << "invalid export range or fps\n";
         return 6;
     }
@@ -173,17 +197,32 @@ int wmain(const int argumentCount, wchar_t** arguments) {
         return 7;
     }
 
-    SequenceExportSnapshot sequence;
-    sequence.sourceGeneration = 1U;
-    sequence.sourceFolder = sourceFolder;
-    sequence.orderedPngFrames = std::move(scan.frames);
-    sequence.inclusiveRange = {
-        static_cast<FrameIndex>(*start),
-        static_cast<FrameIndex>(*end)};
-    sequence.framesPerSecond = *framesPerSecond;
-
     zt::sequence::exporting::FfmpegExportRequest request;
-    request.sequence = std::move(sequence);
+    if (scan.has_value()) {
+        SequenceExportSnapshot sequence;
+        sequence.sourceGeneration = 1U;
+        sequence.sourceFolder = sourcePath;
+        sequence.orderedPngFrames = std::move(scan->frames);
+        sequence.inclusiveRange = {
+            static_cast<FrameIndex>(*start),
+            static_cast<FrameIndex>(*end)};
+        sequence.framesPerSecond = *framesPerSecond;
+        request.source = std::move(sequence);
+    } else {
+        VideoExportSnapshot video;
+        video.sourceGeneration = 1U;
+        video.sourceFile = sourcePath.lexically_normal();
+        video.inclusiveRange = {
+            static_cast<FrameIndex>(*start),
+            static_cast<FrameIndex>(*end)};
+        video.sourceFramesPerSecond =
+            videoProbe->metadata.framesPerSecond;
+        video.framesPerSecond = *framesPerSecond;
+        video.totalFrames = videoProbe->metadata.frameCount;
+        video.sourceWidth = videoProbe->metadata.width;
+        video.sourceHeight = videoProbe->metadata.height;
+        request.source = std::move(video);
+    }
     request.crop = *crop;
     request.outputFolder = outputFolder;
 

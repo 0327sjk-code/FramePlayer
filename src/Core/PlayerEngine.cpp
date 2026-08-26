@@ -23,7 +23,7 @@ bool PlayerEngine::ReloadFolder() {
     return impl_->ReloadFolder();
 }
 
-std::optional<SequenceExportSnapshot> PlayerEngine::CaptureExportSnapshot() const {
+std::optional<ExportSourceSnapshot> PlayerEngine::CaptureExportSnapshot() const {
     return impl_->CaptureExportSnapshot();
 }
 

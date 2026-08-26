@@ -64,7 +64,7 @@ public:
     [[nodiscard]] bool LoadFolder(const std::filesystem::path& folder);
     [[nodiscard]] bool LoadSource(const std::filesystem::path& sourcePath);
     [[nodiscard]] bool ReloadFolder();
-    [[nodiscard]] std::optional<SequenceExportSnapshot>
+    [[nodiscard]] std::optional<ExportSourceSnapshot>
     CaptureExportSnapshot() const;
 
     [[nodiscard]] bool SetComparisonEnabled(bool enabled);
