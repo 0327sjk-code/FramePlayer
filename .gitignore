@@ -1,0 +1,14 @@
+/build/
+/out/
+/outputs/*
+!/outputs/.gitkeep
+/FramePlayer.exe
+/_backups/
+/.vs/
+/.idea/
+*.user
+*.suo
+*.VC.db
+*.opendb
+*.log
+*.tmp
