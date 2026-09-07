@@ -10,6 +10,67 @@ inline constexpr int kMinimumMemoryGiB = 4;
 inline constexpr int kMaximumMemoryGiB = 48;
 inline constexpr std::uint64_t kBytesPerGiB = 1024ULL * 1024ULL * 1024ULL;
 inline constexpr float kViewportScrubFramesPerPixel = 0.5F;
+inline constexpr float kBottomBarControlRowStride = 40.0F;
+
+struct BottomBarLogicalLayout final {
+    float timelineY = 0.0F;
+    float playbackRangeY = 0.0F;
+    float sequenceFrameOffsetY = 0.0F;
+    float controlsY = 0.0F;
+    float statusY = 0.0F;
+    float height = 0.0F;
+};
+
+// Keeps all conditional bottom-bar coordinates in one pure calculation. A
+// sequence offset row is inserted above the controls without changing their
+// internal spacing in either the standard or compact layout.
+[[nodiscard]] inline constexpr BottomBarLogicalLayout
+CalculateBottomBarLogicalLayout(
+    const bool compact,
+    const bool showSequenceFrameOffset) noexcept {
+    constexpr float kTimelineY = 8.0F;
+    constexpr float kPlaybackRangeY = 42.0F;
+    constexpr float kSequenceFrameOffsetY = 80.0F;
+    constexpr float kControlsY = 80.0F;
+    constexpr float kStatusGapAfterControlRows = 4.0F;
+    constexpr float kBottomPaddingAfterStatus = 28.0F;
+    const float insertedHeight = showSequenceFrameOffset
+        ? kBottomBarControlRowStride
+        : 0.0F;
+    const float controlsY = kControlsY + insertedHeight;
+    const float controlRows = compact ? 4.0F : 2.0F;
+    const float statusY = controlsY +
+        kBottomBarControlRowStride * controlRows +
+        kStatusGapAfterControlRows;
+    return {
+        kTimelineY,
+        kPlaybackRangeY,
+        kSequenceFrameOffsetY,
+        controlsY,
+        statusY,
+        statusY + kBottomPaddingAfterStatus};
+}
+
+[[nodiscard]] inline constexpr bool
+ShouldShowComparisonSequenceFrameOffset(
+    const bool comparisonActive,
+    const bool sequenceFrameOffsetAvailable) noexcept {
+    return comparisonActive && sequenceFrameOffsetAvailable;
+}
+
+[[nodiscard]] inline constexpr std::uint32_t
+ClampComparisonSequenceFrameOffsetInput(
+    const std::int64_t requestedOffset,
+    const std::uint32_t maximumOffset) noexcept {
+    if (requestedOffset <= 0) {
+        return 0U;
+    }
+    const std::uint64_t positiveOffset =
+        static_cast<std::uint64_t>(requestedOffset);
+    return positiveOffset > static_cast<std::uint64_t>(maximumOffset)
+        ? maximumOffset
+        : static_cast<std::uint32_t>(positiveOffset);
+}
 
 [[nodiscard]] inline constexpr bool ClientPointInsideRect(
     const std::int32_t clientX,

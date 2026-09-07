@@ -324,7 +324,7 @@ void PlayerUI::Impl::RenderEmptyOrLoading(
             -Scale(12.0F));
         DrawCenteredText(
             drawList,
-            "也可以使用下方的打开文件夹或打开当前序列",
+            "也可以使用下方的打开文件夹或打开上次序列",
             minimum,
             maximum,
             ImGui::GetColorU32(kColorMuted),

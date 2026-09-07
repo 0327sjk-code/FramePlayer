@@ -225,8 +225,8 @@ bool PlayerEngine::Impl::ReloadFolder() {
                 pendingLoad_->preservedPlaybackRange;
         } else {
             errorUtf8_ = activeSession_ && activeSession_->kind == SourceKind::Video
-                ? "视频来源不支持重扫"
-                : "当前没有可重新扫描的文件夹";
+                ? "视频来源不支持重新加载"
+                : "当前没有可重新加载的序列文件夹";
             return false;
         }
     }

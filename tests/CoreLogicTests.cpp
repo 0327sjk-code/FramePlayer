@@ -493,6 +493,183 @@ int main() {
             kMemoryLimit,
             false) == kMemoryLimit,
         "foreground mode preserves the configured memory limit");
+
+    const auto primarySequenceOffsetDomain =
+        zt::sequence::comparison_detail::ResolveSequenceFrameOffsetDomain(
+            zt::sequence::SourceKind::PngSequence,
+            1000U,
+            zt::sequence::SourceKind::Video,
+            800U,
+            true);
+    passed &= Expect(
+        primarySequenceOffsetDomain.available &&
+            primarySequenceOffsetDomain.onPrimary &&
+            primarySequenceOffsetDomain.maximum == 999U,
+        "comparison offset resolves the primary sequence lane and maximum");
+    const auto secondarySequenceOffsetDomain =
+        zt::sequence::comparison_detail::ResolveSequenceFrameOffsetDomain(
+            zt::sequence::SourceKind::Video,
+            800U,
+            zt::sequence::SourceKind::PngSequence,
+            1000U,
+            true);
+    passed &= Expect(
+        secondarySequenceOffsetDomain.available &&
+            !secondarySequenceOffsetDomain.onPrimary &&
+            secondarySequenceOffsetDomain.maximum == 999U,
+        "comparison offset resolves the secondary sequence lane and maximum");
+    passed &= Expect(
+        !zt::sequence::comparison_detail::ResolveSequenceFrameOffsetDomain(
+             zt::sequence::SourceKind::Video,
+             800U,
+             zt::sequence::SourceKind::Video,
+             800U,
+             true).available &&
+            !zt::sequence::comparison_detail::ResolveSequenceFrameOffsetDomain(
+                 zt::sequence::SourceKind::PngSequence,
+                 800U,
+                 zt::sequence::SourceKind::PngSequence,
+                 800U,
+                 true).available &&
+            !zt::sequence::comparison_detail::ResolveSequenceFrameOffsetDomain(
+                 zt::sequence::SourceKind::PngSequence,
+                 800U,
+                 zt::sequence::SourceKind::Video,
+                 800U,
+                 false).available,
+        "comparison offset is unavailable without exactly one active sequence lane");
+    passed &= Expect(
+        zt::sequence::comparison_detail::LaneUsesSequenceFrameOffset(
+            zt::sequence::SourceKind::PngSequence,
+            true,
+            primarySequenceOffsetDomain) &&
+            !zt::sequence::comparison_detail::LaneUsesSequenceFrameOffset(
+                zt::sequence::SourceKind::Video,
+                false,
+                primarySequenceOffsetDomain) &&
+            zt::sequence::comparison_detail::LaneUsesSequenceFrameOffset(
+                zt::sequence::SourceKind::PngSequence,
+                false,
+                secondarySequenceOffsetDomain),
+        "only the resolved sequence lane consumes the comparison offset");
+
+    const auto sequenceFirstMapped =
+        zt::sequence::comparison_detail::MapSharedFrameToLane(
+            0U,
+            1000U,
+            true,
+            200U);
+    const auto sequenceLastMapped =
+        zt::sequence::comparison_detail::MapSharedFrameToLane(
+            799U,
+            1000U,
+            true,
+            200U);
+    const auto sequencePastEndMapped =
+        zt::sequence::comparison_detail::MapSharedFrameToLane(
+            800U,
+            1000U,
+            true,
+            200U);
+    const auto videoMapped =
+        zt::sequence::comparison_detail::MapSharedFrameToLane(
+            799U,
+            800U,
+            false,
+            std::numeric_limits<FrameIndex>::max());
+    passed &= Expect(
+        sequenceFirstMapped.exists &&
+            sequenceFirstMapped.sourceFrame == 200U &&
+            sequenceLastMapped.exists &&
+            sequenceLastMapped.sourceFrame == 999U &&
+            !sequencePastEndMapped.exists &&
+            videoMapped.exists && videoMapped.sourceFrame == 799U,
+        "shared frames map through the sequence in-point while video stays unchanged");
+    const auto overflowMapped =
+        zt::sequence::comparison_detail::MapSharedFrameToLane(
+            std::numeric_limits<FrameIndex>::max(),
+            std::numeric_limits<std::size_t>::max(),
+            true,
+            1U);
+    passed &= Expect(
+        !overflowMapped.exists,
+        "sequence frame offset addition rejects FrameIndex overflow");
+
+    passed &= Expect(
+        zt::sequence::comparison_detail::LaneSharedFrameCount(
+            1000U,
+            true,
+            200U) == 800U &&
+            zt::sequence::comparison_detail::LaneSharedFrameCount(
+                1000U,
+                false,
+                200U) == 1000U &&
+            zt::sequence::comparison_detail::LaneSharedFrameCount(
+                100U,
+                true,
+                100U) == 0U,
+        "sequence in-point shortens only the sequence shared duration");
+    passed &= Expect(
+        zt::sequence::comparison_detail::CommonTotalFramesWithSequenceOffset(
+            1000U,
+            zt::sequence::SourceKind::PngSequence,
+            800U,
+            zt::sequence::SourceKind::Video,
+            true,
+            200U) == 800U &&
+            zt::sequence::comparison_detail::CommonTotalFramesWithSequenceOffset(
+                1000U,
+                zt::sequence::SourceKind::PngSequence,
+                900U,
+                zt::sequence::SourceKind::Video,
+                true,
+                200U) == 900U &&
+            zt::sequence::comparison_detail::CommonTotalFramesWithSequenceOffset(
+                900U,
+                zt::sequence::SourceKind::Video,
+                1000U,
+                zt::sequence::SourceKind::PngSequence,
+                true,
+                200U) == 900U,
+        "comparison duration uses the sequence duration remaining after its in-point");
+    passed &= Expect(
+        zt::sequence::comparison_detail::CommonTotalFramesWithSequenceOffset(
+            1000U,
+            zt::sequence::SourceKind::PngSequence,
+            800U,
+            zt::sequence::SourceKind::Video,
+            true,
+            0U) ==
+            zt::sequence::comparison_detail::CommonTotalFrames(
+                1000U,
+                800U,
+                true),
+        "zero sequence offset preserves the original comparison duration");
+    const zt::sequence::PlaybackRange mappedSequenceRange =
+        zt::sequence::comparison_detail::MapSharedPlaybackRangeToLane(
+            {100U, 300U},
+            1000U,
+            true,
+            200U);
+    const zt::sequence::PlaybackRange mappedVideoRange =
+        zt::sequence::comparison_detail::MapSharedPlaybackRangeToLane(
+            {100U, 300U},
+            800U,
+            false,
+            200U);
+    passed &= Expect(
+        mappedSequenceRange == zt::sequence::PlaybackRange{300U, 500U} &&
+            mappedVideoRange == zt::sequence::PlaybackRange{100U, 300U},
+        "shared playback range shifts only inside the sequence engine");
+    passed &= Expect(
+        zt::sequence::comparison_detail::IsFullSharedPlaybackRange(
+            {0U, 799U},
+            800U) &&
+            !zt::sequence::comparison_detail::IsFullSharedPlaybackRange(
+                {100U, 799U},
+                800U),
+        "offset-shortened full range remains identifiable when a lane is replaced");
+
     const std::size_t maximumSize = std::numeric_limits<std::size_t>::max();
     const std::size_t seventyPercentMaximum = PercentageOfSize(maximumSize, 70U);
     passed &= Expect(

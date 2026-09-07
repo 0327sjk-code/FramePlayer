@@ -14,6 +14,8 @@ using zt::sequence::ui_detail::ClampPlaybackEndInputOneBased;
 using zt::sequence::ui_detail::ClampPlaybackEndHandle;
 using zt::sequence::ui_detail::ClampPlaybackStartInputOneBased;
 using zt::sequence::ui_detail::ClampPlaybackStartHandle;
+using zt::sequence::ui_detail::ClampComparisonSequenceFrameOffsetInput;
+using zt::sequence::ui_detail::CalculateBottomBarLogicalLayout;
 using zt::sequence::ui_detail::CalculateTimelineReadyCacheSegments;
 using zt::sequence::ui_detail::FrameFromNormalizedPosition;
 using zt::sequence::ui_detail::FrameTimestampSeconds;
@@ -29,6 +31,7 @@ using zt::sequence::ui_detail::ResolvePlayerHotkeyCommand;
 using zt::sequence::ui_detail::ScrubTargetFrame;
 using zt::sequence::ui_detail::ShouldHandleNavigationHotkeys;
 using zt::sequence::ui_detail::ShouldHandlePlaybackHotkey;
+using zt::sequence::ui_detail::ShouldShowComparisonSequenceFrameOffset;
 using zt::sequence::ui_detail::CalculateViewportImageRect;
 using zt::sequence::ui_detail::CalculateComparisonCanvasLayout;
 using zt::sequence::ui_detail::ClampViewportCenter;
@@ -161,6 +164,41 @@ static_assert(ClampMemoryGiB(3) == 4);
 static_assert(ClampMemoryGiB(25) == 25);
 static_assert(ClampMemoryGiB(64) == 48);
 static_assert(MemoryBytesFromGiB(25) == 25ULL * 1024ULL * 1024ULL * 1024ULL);
+
+inline constexpr auto kStandardBottomBar =
+    CalculateBottomBarLogicalLayout(false, false);
+inline constexpr auto kStandardBottomBarWithSequenceOffset =
+    CalculateBottomBarLogicalLayout(false, true);
+inline constexpr auto kCompactBottomBar =
+    CalculateBottomBarLogicalLayout(true, false);
+inline constexpr auto kCompactBottomBarWithSequenceOffset =
+    CalculateBottomBarLogicalLayout(true, true);
+static_assert(kStandardBottomBar.controlsY == 80.0F);
+static_assert(kStandardBottomBar.statusY == 164.0F);
+static_assert(kStandardBottomBar.height == 192.0F);
+static_assert(kStandardBottomBarWithSequenceOffset.sequenceFrameOffsetY == 80.0F);
+static_assert(kStandardBottomBarWithSequenceOffset.controlsY == 120.0F);
+static_assert(kStandardBottomBarWithSequenceOffset.statusY == 204.0F);
+static_assert(kStandardBottomBarWithSequenceOffset.height == 232.0F);
+static_assert(kCompactBottomBar.controlsY == 80.0F);
+static_assert(kCompactBottomBar.statusY == 244.0F);
+static_assert(kCompactBottomBar.height == 272.0F);
+static_assert(kCompactBottomBarWithSequenceOffset.controlsY == 120.0F);
+static_assert(kCompactBottomBarWithSequenceOffset.statusY == 284.0F);
+static_assert(kCompactBottomBarWithSequenceOffset.height == 312.0F);
+
+static_assert(!ShouldShowComparisonSequenceFrameOffset(false, false));
+static_assert(!ShouldShowComparisonSequenceFrameOffset(false, true));
+static_assert(!ShouldShowComparisonSequenceFrameOffset(true, false));
+static_assert(ShouldShowComparisonSequenceFrameOffset(true, true));
+static_assert(ClampComparisonSequenceFrameOffsetInput(-1, 999U) == 0U);
+static_assert(ClampComparisonSequenceFrameOffsetInput(0, 999U) == 0U);
+static_assert(ClampComparisonSequenceFrameOffsetInput(200, 999U) == 200U);
+static_assert(ClampComparisonSequenceFrameOffsetInput(1000, 999U) == 999U);
+static_assert(ClampComparisonSequenceFrameOffsetInput(
+    std::numeric_limits<std::int64_t>::max(),
+    std::numeric_limits<std::uint32_t>::max()) ==
+    std::numeric_limits<std::uint32_t>::max());
 
 static_assert(CanOpenLastExportedVideo(true, true, true));
 static_assert(!CanOpenLastExportedVideo(false, true, true));

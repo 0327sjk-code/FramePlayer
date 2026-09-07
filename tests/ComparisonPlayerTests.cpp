@@ -17,6 +17,7 @@ using zt::sequence::ComparisonPlayer;
 using zt::sequence::ComparisonPlayerSnapshot;
 using zt::sequence::FrameIndex;
 using zt::sequence::Generation;
+using zt::sequence::SourceKind;
 using zt::sequence::kDefaultMemoryLimitBytes;
 
 inline constexpr std::array<std::uint8_t, 70> kOnePixelPng{
@@ -735,6 +736,65 @@ template <typename Predicate>
     return passed;
 }
 
+[[nodiscard]] bool TestSequenceFrameOffsetNoOpForTwoSequences() {
+    bool passed = true;
+    TemporaryComparisonSequences sequences;
+    passed &= Expect(
+        sequences.WritePrimaryFrames(4U),
+        "write offset-noop primary frames");
+    passed &= Expect(
+        sequences.WriteSecondaryFrames(4U),
+        "write offset-noop secondary frames");
+    if (!passed) {
+        return false;
+    }
+
+    ComparisonPlayer player;
+    ComparisonPlayerSnapshot snapshot;
+    passed &= Expect(
+        LoadActiveComparison(player, sequences, snapshot),
+        "load two-sequence comparison for offset no-op");
+    if (!passed) {
+        player.Shutdown();
+        return false;
+    }
+
+    const Generation primaryGeneration = snapshot.primary.generation;
+    const Generation secondaryGeneration = snapshot.secondary.generation;
+    passed &= Expect(
+        snapshot.primary.sourceKind == SourceKind::PngSequence &&
+            snapshot.secondary.sourceKind == SourceKind::PngSequence &&
+            !snapshot.sequenceFrameOffsetAvailable,
+        "two-sequence comparison does not expose an ambiguous sequence offset");
+
+    player.SetComparisonSequenceFrameOffset(2U);
+    snapshot = player.Snapshot();
+    passed &= Expect(
+        !snapshot.sequenceFrameOffsetAvailable &&
+            snapshot.totalFrames == 4U && snapshot.requestedFrame == 0U &&
+            snapshot.primary.generation == primaryGeneration &&
+            snapshot.secondary.generation == secondaryGeneration,
+        "sequence offset command is a no-op when both lanes are sequences");
+
+    player.Seek(2U);
+    passed &= Expect(
+        WaitFor(
+            player,
+            snapshot,
+            [](const ComparisonPlayerSnapshot& value) {
+                return value.pairReady && value.currentFrame == 2U &&
+                    value.requestedFrame == 2U &&
+                    value.primaryDisplayFrame != nullptr &&
+                    value.secondaryDisplayFrame != nullptr &&
+                    value.primaryDisplayFrame->index == 2U &&
+                    value.secondaryDisplayFrame->index == 2U;
+            }),
+        "two-sequence comparison retains the original shared frame mapping");
+
+    player.Shutdown();
+    return passed;
+}
+
 }  // namespace
 
 int main() {
@@ -888,5 +948,6 @@ int main() {
     passed &= TestDecodePercentRollback();
     passed &= TestRejectComparisonEnableDuringPrimaryPending();
     passed &= TestBackgroundResourceMode();
+    passed &= TestSequenceFrameOffsetNoOpForTwoSequences();
     return passed ? 0 : 1;
 }

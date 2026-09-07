@@ -224,7 +224,7 @@ struct FrameNumberInputResult final {
 void PlayerUI::Impl::RenderBottomBar(
     ComparisonPlayer& player,
     const PlayerSnapshot& snapshot,
-    const bool comparisonEnabled,
+    const ComparisonPlayerSnapshot& comparisonSnapshot,
     exporting::FfmpegExportController& exporter,
     const exporting::ExportProgressSnapshot& exportProgress,
     const OnlineUpdateView& onlineUpdateView,
@@ -245,22 +245,40 @@ void PlayerUI::Impl::RenderBottomBar(
     const float logicalWidth =
         ImGui::GetWindowSize().x / std::max(uiScale_, 0.5F);
     const bool compact = logicalWidth < ui_internal::kCompactBottomBarThreshold;
+    const bool showSequenceFrameOffset =
+        ui_detail::ShouldShowComparisonSequenceFrameOffset(
+            comparisonSnapshot.active,
+            comparisonSnapshot.sequenceFrameOffsetAvailable);
+    const ui_detail::BottomBarLogicalLayout layout =
+        ui_detail::CalculateBottomBarLogicalLayout(
+            compact,
+            showSequenceFrameOffset);
 
-    ImGui::SetCursorPosY(Scale(8.0F));
+    ImGui::SetCursorPosY(Scale(layout.timelineY));
     RenderTimeline(player, snapshot);
-    ImGui::SetCursorPosY(Scale(42.0F));
+    ImGui::SetCursorPosY(Scale(layout.playbackRangeY));
     RenderPlaybackRange(player, snapshot);
-    ImGui::SetCursorPosY(Scale(80.0F));
+    if (showSequenceFrameOffset) {
+        ImGui::SetCursorPosY(Scale(layout.sequenceFrameOffsetY));
+        RenderComparisonSequenceFrameOffset(player, comparisonSnapshot);
+    } else {
+        sequenceFrameOffsetCandidate_ = 0U;
+        sequenceFrameOffsetInput_ = 0;
+        sequenceFrameOffsetInputEditing_ = false;
+        sequenceFrameOffsetCommittedWhileActive_ = false;
+        sequenceFrameOffsetSliderEditing_ = false;
+    }
+    ImGui::SetCursorPosY(Scale(layout.controlsY));
     RenderPlaybackControls(
         player,
         snapshot,
-        comparisonEnabled,
+        comparisonSnapshot.enabled,
         exporter,
         exportProgress,
         onlineUpdateView,
         actions,
         compact);
-    ImGui::SetCursorPosY(Scale(compact ? 244.0F : 164.0F));
+    ImGui::SetCursorPosY(Scale(layout.statusY));
     RenderStatusLine(snapshot, exportProgress, onlineUpdateView, error);
 
     ImGui::EndChild();
@@ -655,6 +673,145 @@ void PlayerUI::Impl::RenderPlaybackRange(
     ImGui::EndDisabled();
 }
 
+void PlayerUI::Impl::RenderComparisonSequenceFrameOffset(
+    ComparisonPlayer& player,
+    const ComparisonPlayerSnapshot& snapshot) {
+    if (!ui_detail::ShouldShowComparisonSequenceFrameOffset(
+            snapshot.active,
+            snapshot.sequenceFrameOffsetAvailable)) {
+        sequenceFrameOffsetSliderEditing_ = false;
+        sequenceFrameOffsetInputEditing_ = false;
+        return;
+    }
+
+    const float rowHeight = Scale(kControlHeight);
+    constexpr ImGuiTableFlags tableFlags =
+        ImGuiTableFlags_SizingStretchProp |
+        ImGuiTableFlags_NoSavedSettings |
+        ImGuiTableFlags_NoPadOuterX;
+    const bool sourceLoading =
+        snapshot.primary.loading || snapshot.secondary.loading;
+
+    if (!sequenceFrameOffsetSliderEditing_ &&
+        !sequenceFrameOffsetInputEditing_) {
+        sequenceFrameOffsetCandidate_ = snapshot.sequenceFrameOffset;
+        sequenceFrameOffsetInput_ = static_cast<std::int64_t>(
+            snapshot.sequenceFrameOffset);
+    }
+    sequenceFrameOffsetCandidate_ = std::min(
+        sequenceFrameOffsetCandidate_,
+        snapshot.maximumSequenceFrameOffset);
+
+    ImGui::BeginDisabled(sourceLoading);
+    ImGui::PushStyleVar(
+        ImGuiStyleVar_CellPadding,
+        ImVec2(ImGui::GetStyle().CellPadding.x, 0.0F));
+    if (ImGui::BeginTable(
+            "##ComparisonSequenceFrameOffsetLayout",
+            3,
+            tableFlags,
+            ImVec2(-1.0F, rowHeight))) {
+        ImGui::TableSetupColumn(
+            "##ComparisonSequenceFrameOffsetLabel",
+            ImGuiTableColumnFlags_WidthFixed,
+            Scale(112.0F));
+        ImGui::TableSetupColumn(
+            "##ComparisonSequenceFrameOffsetTrack",
+            ImGuiTableColumnFlags_WidthStretch,
+            1.0F);
+        ImGui::TableSetupColumn(
+            "##ComparisonSequenceFrameOffsetValue",
+            ImGuiTableColumnFlags_WidthFixed,
+            Scale(270.0F));
+        ImGui::TableNextRow(ImGuiTableRowFlags_None, rowHeight);
+
+        ImGui::TableSetColumnIndex(0);
+        ImGui::SetCursorPosY(
+            ImGui::GetCursorPosY() +
+            std::max(
+                0.0F,
+                (rowHeight - ImGui::GetTextLineHeight()) * 0.5F));
+        ImGui::TextColored(
+            kColorMuted,
+            snapshot.sequenceFrameOffsetOnPrimary
+                ? "左侧序列偏移"
+                : "右侧序列偏移");
+
+        ImGui::TableSetColumnIndex(1);
+        const bool sliderChanged = ui::FramePositionSlider(
+            interactionAnimator_,
+            "##ComparisonSequenceFrameOffsetSlider",
+            sequenceFrameOffsetCandidate_,
+            snapshot.maximumSequenceFrameOffset,
+            ImVec2(ImGui::GetContentRegionAvail().x, rowHeight),
+            uiScale_);
+        const bool sliderActivated = ImGui::IsItemActivated();
+        const bool sliderDeactivated = ImGui::IsItemDeactivated();
+        TooltipForLastItem(
+            "设置序列开头跳过的帧数；输入 200 时，共享第 1 帧对应序列第 201 张，视频仍从第 1 帧开始");
+        if (sliderActivated) {
+            sequenceFrameOffsetSliderEditing_ = true;
+            player.SetPlaying(false);
+        }
+        if (sliderChanged) {
+            sequenceFrameOffsetInput_ = static_cast<std::int64_t>(
+                sequenceFrameOffsetCandidate_);
+        }
+        if (sequenceFrameOffsetSliderEditing_ && sliderDeactivated) {
+            sequenceFrameOffsetSliderEditing_ = false;
+            if (!sourceLoading &&
+                sequenceFrameOffsetCandidate_ != snapshot.sequenceFrameOffset) {
+                player.SetComparisonSequenceFrameOffset(
+                    sequenceFrameOffsetCandidate_);
+            }
+        }
+
+        ImGui::TableSetColumnIndex(2);
+        ImGui::PushStyleVar(
+            ImGuiStyleVar_FramePadding,
+            ImVec2(Scale(10.0F), Scale(10.0F)));
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextColored(kColorMuted, "跳过");
+        ImGui::SameLine(0.0F, Scale(4.0F));
+        const FrameNumberInputResult input = RenderFrameNumberInput(
+            "##ComparisonSequenceFrameOffsetInput",
+            sequenceFrameOffsetInput_,
+            Scale(76.0F),
+            sequenceFrameOffsetCommittedWhileActive_);
+        TooltipForLastItem(
+            "输入要从序列开头跳过的帧数；按 Enter 或移开焦点后应用");
+        sequenceFrameOffsetInputEditing_ = input.active;
+        if (input.commit && !sequenceFrameOffsetSliderEditing_) {
+            const FrameIndex committedOffset =
+                ui_detail::ClampComparisonSequenceFrameOffsetInput(
+                    sequenceFrameOffsetInput_,
+                    snapshot.maximumSequenceFrameOffset);
+            sequenceFrameOffsetCandidate_ = committedOffset;
+            sequenceFrameOffsetInput_ = static_cast<std::int64_t>(
+                committedOffset);
+            player.SetPlaying(false);
+            if (committedOffset != snapshot.sequenceFrameOffset) {
+                player.SetComparisonSequenceFrameOffset(committedOffset);
+            }
+        }
+        const FrameIndex displayedOffset = sequenceFrameOffsetInputEditing_
+            ? ui_detail::ClampComparisonSequenceFrameOffsetInput(
+                sequenceFrameOffsetInput_,
+                snapshot.maximumSequenceFrameOffset)
+            : sequenceFrameOffsetCandidate_;
+        const double offsetSeconds = ui_detail::FrameTimestampSeconds(
+            displayedOffset,
+            snapshot.targetFramesPerSecond);
+        ImGui::SameLine(0.0F, Scale(4.0F));
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextColored(kColorMuted, "帧  ·  %.2f 秒", offsetSeconds);
+        ImGui::PopStyleVar();
+        ImGui::EndTable();
+    }
+    ImGui::PopStyleVar();
+    ImGui::EndDisabled();
+}
+
 void PlayerUI::Impl::RenderPlaybackControls(
     ComparisonPlayer& player,
     const PlayerSnapshot& snapshot,
@@ -664,7 +821,7 @@ void PlayerUI::Impl::RenderPlaybackControls(
     const OnlineUpdateView& onlineUpdateView,
     const UiActions& actions,
     const bool compact) {
-    constexpr float kQuickActionsWidth = 460.0F;
+    constexpr float kQuickActionsWidth = 484.0F;
     constexpr float kResourceSettingsWidth = 648.0F;
     constexpr float kResourceSettingsColumnWidth = 660.0F;
     constexpr float kPlaybackSettingsWidth = 206.0F;
@@ -680,19 +837,23 @@ void PlayerUI::Impl::RenderPlaybackControls(
                 0.0F,
                 (availableWidth - Scale(logicalWidth)) * 0.5F));
     };
+    const float controlsTop = ImGui::GetCursorPosY();
 
     if (compact) {
         RenderTransportControls(player, snapshot);
 
-        ImGui::SetCursorPosY(Scale(120.0F));
+        ImGui::SetCursorPosY(
+            controlsTop + Scale(ui_detail::kBottomBarControlRowStride));
         centerGroup(kQuickActionsWidth);
         RenderQuickActions(player, snapshot, comparisonEnabled, actions);
 
-        ImGui::SetCursorPosY(Scale(160.0F));
+        ImGui::SetCursorPosY(
+            controlsTop + Scale(ui_detail::kBottomBarControlRowStride * 2.0F));
         centerGroup(kResourceSettingsWidth);
         RenderResourceSettings(player, snapshot);
 
-        ImGui::SetCursorPosY(Scale(200.0F));
+        ImGui::SetCursorPosY(
+            controlsTop + Scale(ui_detail::kBottomBarControlRowStride * 3.0F));
         ImGui::PushStyleVar(
             ImGuiStyleVar_CellPadding,
             ImVec2(ImGui::GetStyle().CellPadding.x, 0.0F));
@@ -748,7 +909,8 @@ void PlayerUI::Impl::RenderPlaybackControls(
         snapshot,
         IsExportBusy(exportProgress.state));
 
-    ImGui::SetCursorPosY(Scale(120.0F));
+    ImGui::SetCursorPosY(
+        controlsTop + Scale(ui_detail::kBottomBarControlRowStride));
     ImGui::PushStyleVar(
         ImGuiStyleVar_CellPadding,
         ImVec2(ImGui::GetStyle().CellPadding.x, 0.0F));

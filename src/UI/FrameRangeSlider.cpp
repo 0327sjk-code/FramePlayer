@@ -255,4 +255,111 @@ bool FrameRangeSlider(
     return changed;
 }
 
+bool FramePositionSlider(
+    InteractionAnimator& animator,
+    const char* const label,
+    FrameIndex& frame,
+    const FrameIndex maximumFrame,
+    ImVec2 size,
+    const float uiScale) {
+    if (label == nullptr || size.x <= 0.0F || size.y <= 0.0F) {
+        return false;
+    }
+
+    const float scale = std::max(uiScale, 0.5F);
+    frame = std::min(frame, maximumFrame);
+
+    const ImGuiID id = ImGui::GetID(label);
+    static_cast<void>(ImGui::InvisibleButton(
+        label,
+        size,
+        ImGuiButtonFlags_MouseButtonLeft));
+    const InteractionAnimation animation = animator.ObserveLastItem(id);
+
+    const ImVec2 minimum = ImGui::GetItemRectMin();
+    const ImVec2 maximum = ImGui::GetItemRectMax();
+    const float centerY = (minimum.y + maximum.y) * 0.5F;
+    const float endpointInset = 10.0F * scale;
+    const float trackMinimumX = minimum.x + endpointInset;
+    const float trackMaximumX = std::max(
+        trackMinimumX + 1.0F,
+        maximum.x - endpointInset);
+    const float trackWidth = trackMaximumX - trackMinimumX;
+
+    if (ImGui::IsItemHovered() || ImGui::IsItemActive()) {
+        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+    }
+
+    bool changed = false;
+    if (ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+        const double normalized = trackWidth > 0.0F
+            ? static_cast<double>(
+                (ImGui::GetIO().MousePos.x - trackMinimumX) / trackWidth)
+            : 0.0;
+        const double clamped = std::clamp(normalized, 0.0, 1.0);
+        const FrameIndex requested = static_cast<FrameIndex>(std::llround(
+            clamped * static_cast<double>(maximumFrame)));
+        changed = requested != frame;
+        frame = requested;
+    }
+
+    const float frameX = maximumFrame > 0U
+        ? trackMinimumX + trackWidth * static_cast<float>(
+            static_cast<double>(frame) / static_cast<double>(maximumFrame))
+        : trackMinimumX;
+
+    ImDrawList* const drawList = ImGui::GetWindowDrawList();
+    const float baseHalfHeight = (3.0F + animation.hover * 0.45F) * scale;
+    drawList->AddRectFilled(
+        ImVec2(trackMinimumX, centerY - baseHalfHeight),
+        ImVec2(trackMaximumX, centerY + baseHalfHeight),
+        ImGui::GetColorU32(ui_internal::kColorSurfaceActive),
+        3.0F * scale);
+    if (frameX > trackMinimumX) {
+        drawList->AddRectFilled(
+            ImVec2(trackMinimumX, centerY - 3.5F * scale),
+            ImVec2(frameX, centerY + 3.5F * scale),
+            ImGui::GetColorU32(ui_internal::WithAlpha(
+                ui_internal::kColorPrimary,
+                0.72F)),
+            3.5F * scale);
+    }
+
+    const bool active = ImGui::IsItemActive();
+    const bool hovered = ImGui::IsItemHovered();
+    const float halfWidth =
+        (active ? 6.0F : (hovered ? 5.0F + animation.hover : 5.0F)) * scale;
+    const float halfHeight = 11.0F * scale;
+    const ImVec2 handleMinimum{frameX - halfWidth, centerY - halfHeight};
+    const ImVec2 handleMaximum{frameX + halfWidth, centerY + halfHeight};
+    drawList->AddRectFilled(
+        handleMinimum,
+        handleMaximum,
+        ImGui::GetColorU32(
+            active
+                ? ui_internal::kColorPrimary
+                : ui_internal::kColorSurface),
+        5.0F * scale);
+    drawList->AddRect(
+        handleMinimum,
+        handleMaximum,
+        ImGui::GetColorU32(ui_internal::kColorPrimaryHover),
+        5.0F * scale,
+        0,
+        (hovered || active ? 2.5F : 2.0F) * scale);
+
+    if (animation.focus > 0.001F) {
+        drawList->AddRect(
+            minimum,
+            maximum,
+            ImGui::GetColorU32(ui_internal::WithAlpha(
+                ui_internal::kColorAccent,
+                animation.focus)),
+            6.0F * scale,
+            0,
+            1.5F * scale);
+    }
+    return changed;
+}
+
 }  // namespace zt::sequence::ui

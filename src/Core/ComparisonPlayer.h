@@ -22,11 +22,15 @@ struct ComparisonPlayerSnapshot final {
     bool buffering = false;
     bool loopPlayback = true;
     bool backgroundResourceMode = false;
+    bool sequenceFrameOffsetAvailable = false;
+    bool sequenceFrameOffsetOnPrimary = false;
 
     FrameIndex currentFrame = 0U;
     FrameIndex requestedFrame = 0U;
     FrameIndex playbackStartFrame = 0U;
     FrameIndex playbackEndFrame = 0U;
+    FrameIndex sequenceFrameOffset = 0U;
+    FrameIndex maximumSequenceFrameOffset = 0U;
     std::size_t totalFrames = 0U;
 
     double targetFramesPerSecond = kDefaultFramesPerSecond;
@@ -81,6 +85,7 @@ public:
     void Seek(FrameIndex frame);
     void SeekNormalized(double normalizedPosition);
     void SetPlaybackRange(FrameIndex startFrame, FrameIndex endFrame);
+    void SetComparisonSequenceFrameOffset(FrameIndex offset);
     void SetLoopPlayback(bool enabled);
     void SetFramesPerSecond(double framesPerSecond);
     void SetDecodePercent(std::uint32_t percent);

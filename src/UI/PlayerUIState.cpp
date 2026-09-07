@@ -13,8 +13,6 @@
 namespace zt::sequence {
 
 using ui_internal::DecodeDescription;
-using ui_internal::kBottomBarHeight;
-using ui_internal::kCompactBottomBarHeight;
 using ui_internal::kCompactBottomBarThreshold;
 using ui_internal::kExpandedErrorHeight;
 using ui_internal::kTopBarHeight;
@@ -122,7 +120,13 @@ void PlayerUI::Impl::Render(
 
     const ErrorView error = CurrentError(snapshot);
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    const float bottomHeight = BottomBarHeightForWidth(viewport->WorkSize.x) +
+    const bool showSequenceFrameOffset =
+        ui_detail::ShouldShowComparisonSequenceFrameOffset(
+            comparisonSnapshot.active,
+            comparisonSnapshot.sequenceFrameOffsetAvailable);
+    const float bottomHeight = BottomBarHeightForWidth(
+        viewport->WorkSize.x,
+        showSequenceFrameOffset) +
         ((error.visible && errorDetailsExpanded_)
             ? Scale(kExpandedErrorHeight)
             : 0.0F);
@@ -159,7 +163,7 @@ void PlayerUI::Impl::Render(
         RenderBottomBar(
             player,
             snapshot,
-            comparisonSnapshot.enabled,
+            comparisonSnapshot,
             exporter,
             exportProgress,
             onlineUpdateView,
@@ -233,13 +237,15 @@ float PlayerUI::Impl::TopBarHeightForWidth(
     return Scale(kTopBarHeight);
 }
 
-float PlayerUI::Impl::BottomBarHeightForWidth(const float physicalWidth) const noexcept {
+float PlayerUI::Impl::BottomBarHeightForWidth(
+    const float physicalWidth,
+    const bool showSequenceFrameOffset) const noexcept {
     const float safeScale = std::max(uiScale_, 0.5F);
     const float logicalWidth = physicalWidth / safeScale;
-    return Scale(
-        logicalWidth < kCompactBottomBarThreshold
-            ? kCompactBottomBarHeight
-            : kBottomBarHeight);
+    const bool compact = logicalWidth < kCompactBottomBarThreshold;
+    return Scale(ui_detail::CalculateBottomBarLogicalLayout(
+        compact,
+        showSequenceFrameOffset).height);
 }
 
 void PlayerUI::Impl::SynchronizeControls(
@@ -443,8 +449,8 @@ void PlayerUI::Impl::OpenFolder(
 void PlayerUI::Impl::ReloadFolder(ComparisonPlayer& player) {
     if (!player.ReloadFolder()) {
         SetLocalError(
-            "重新扫描失败，已保留当前序列",
-            "当前文件夹无法重新扫描，或首帧无法解码。播放器没有替换现有可用序列。");
+            "重新加载失败，已保留当前序列",
+            "当前序列无法重新加载，或首帧无法解码。播放器没有替换现有可用序列。");
         return;
     }
     ClearLocalError();

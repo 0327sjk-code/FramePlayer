@@ -23,6 +23,7 @@
 namespace zt::sequence {
 
 class ComparisonPlayer;
+struct ComparisonPlayerSnapshot;
 class FrameTexture;
 enum class FrameTextureUploadDomain : std::uint8_t;
 namespace exporting {
@@ -32,8 +33,6 @@ class FfmpegExportController;
 namespace ui_internal {
 
 inline constexpr float kTopBarHeight = 44.0F;
-inline constexpr float kBottomBarHeight = 192.0F;
-inline constexpr float kCompactBottomBarHeight = 272.0F;
 inline constexpr float kCompactBottomBarThreshold = 1340.0F;
 inline constexpr float kExpandedErrorHeight = 42.0F;
 inline constexpr float kControlHeight = 36.0F;
@@ -161,7 +160,9 @@ private:
 
     [[nodiscard]] float Scale(float value) const noexcept;
     [[nodiscard]] float TopBarHeightForWidth(float physicalWidth) const noexcept;
-    [[nodiscard]] float BottomBarHeightForWidth(float physicalWidth) const noexcept;
+    [[nodiscard]] float BottomBarHeightForWidth(
+        float physicalWidth,
+        bool showSequenceFrameOffset) const noexcept;
     void SynchronizeControls(const ComparisonPlayerSnapshot& snapshot);
     void SynchronizeExportResult(
         const exporting::ExportProgressSnapshot& exportProgress);
@@ -238,7 +239,7 @@ private:
     void RenderBottomBar(
         ComparisonPlayer& player,
         const PlayerSnapshot& snapshot,
-        bool comparisonEnabled,
+        const ComparisonPlayerSnapshot& comparisonSnapshot,
         exporting::FfmpegExportController& exporter,
         const exporting::ExportProgressSnapshot& exportProgress,
         const OnlineUpdateView& onlineUpdateView,
@@ -251,6 +252,9 @@ private:
     void RenderPlaybackRange(
         ComparisonPlayer& player,
         const PlayerSnapshot& snapshot);
+    void RenderComparisonSequenceFrameOffset(
+        ComparisonPlayer& player,
+        const ComparisonPlayerSnapshot& snapshot);
     void RenderPlaybackControls(
         ComparisonPlayer& player,
         const PlayerSnapshot& snapshot,
@@ -344,6 +348,11 @@ private:
     bool playbackEndFrameInputEditing_ = false;
     bool playbackStartFrameCommittedWhileActive_ = false;
     bool playbackEndFrameCommittedWhileActive_ = false;
+    FrameIndex sequenceFrameOffsetCandidate_ = 0U;
+    std::int64_t sequenceFrameOffsetInput_ = 0;
+    bool sequenceFrameOffsetInputEditing_ = false;
+    bool sequenceFrameOffsetCommittedWhileActive_ = false;
+    bool sequenceFrameOffsetSliderEditing_ = false;
 
     bool errorDetailsExpanded_ = false;
     LocalErrorKind localErrorKind_ = LocalErrorKind::None;

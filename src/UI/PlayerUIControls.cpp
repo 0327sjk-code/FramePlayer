@@ -39,12 +39,12 @@ void PlayerUI::Impl::RenderQuickActions(
     ImGui::BeginDisabled(snapshot.loading || !canOpenCurrentSequence);
     if (AnimatedButton(
             interactionAnimator_,
-            "打开当前序列",
+            "打开上次序列",
             ImVec2(Scale(112.0F), Scale(kControlHeight)))) {
         actions.openCurrentSequence();
     }
     TooltipForLastItem(currentSequenceRecorded
-        ? "打开最近一次拖入的 PNG 序列文件夹"
+        ? "打开上次成功拖入的 PNG 序列文件夹"
         : "尚未记录拖入的 PNG 序列文件夹");
     ImGui::EndDisabled();
 
@@ -53,13 +53,13 @@ void PlayerUI::Impl::RenderQuickActions(
     ImGui::BeginDisabled(snapshot.loading || !canRescan);
     if (AnimatedButton(
             interactionAnimator_,
-            "重扫",
-            ImVec2(Scale(56.0F), Scale(kControlHeight)))) {
+            "重新加载",
+            ImVec2(Scale(80.0F), Scale(kControlHeight)))) {
         ReloadFolder(player);
     }
     TooltipForLastItem(canRescan
-        ? "重新扫描当前文件夹；失败时保留现有序列"
-        : "仅 PNG 序列支持重扫");
+        ? "重新加载当前序列；失败时保留现有序列"
+        : "仅 PNG 序列支持重新加载");
     ImGui::EndDisabled();
 
     ImGui::SameLine();

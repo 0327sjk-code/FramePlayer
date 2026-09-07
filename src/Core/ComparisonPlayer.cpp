@@ -9,6 +9,7 @@
 #include <system_error>
 #include <thread>
 #include <utility>
+#include <variant>
 
 namespace zt::sequence {
 
@@ -83,6 +84,11 @@ void ComparisonPlayer::SetPlaybackRange(
     const FrameIndex startFrame,
     const FrameIndex endFrame) {
     impl_->SetPlaybackRange(startFrame, endFrame);
+}
+
+void ComparisonPlayer::SetComparisonSequenceFrameOffset(
+    const FrameIndex offset) {
+    impl_->SetComparisonSequenceFrameOffset(offset);
 }
 
 void ComparisonPlayer::SetLoopPlayback(const bool enabled) {
@@ -183,7 +189,9 @@ bool ComparisonPlayer::Impl::LoadFolder(
     const PlayerSnapshot before = primary_->Snapshot();
     PauseForPendingOperation();
     primaryLoad_.previousGeneration = before.generation;
+    primaryLoad_.previousSourceKind = before.sourceKind;
     primaryLoad_.adoptRangeOnSuccess = true;
+    primaryLoad_.resetSequenceFrameOffsetOnSuccess = true;
     primaryLoad_.purpose = PendingLoadPurpose::Source;
     return BeginPrimaryLoad(primary_->LoadFolder(folder));
 }
@@ -205,7 +213,9 @@ bool ComparisonPlayer::Impl::LoadSource(
     const PlayerSnapshot before = primary_->Snapshot();
     PauseForPendingOperation();
     primaryLoad_.previousGeneration = before.generation;
+    primaryLoad_.previousSourceKind = before.sourceKind;
     primaryLoad_.adoptRangeOnSuccess = true;
+    primaryLoad_.resetSequenceFrameOffsetOnSuccess = true;
     primaryLoad_.purpose = PendingLoadPurpose::Source;
     return BeginPrimaryLoad(primary_->LoadSource(sourcePath));
 }
@@ -219,14 +229,16 @@ bool ComparisonPlayer::Impl::ReloadFolder() {
         return primary_->ReloadFolder();
     }
     if (DecodeTransactionActive()) {
-        errorUtf8_ = "解码比例切换尚未完成，请稍后再重新扫描";
+        errorUtf8_ = "解码比例切换尚未完成，请稍后再重新加载";
         return false;
     }
 
     const PlayerSnapshot before = primary_->Snapshot();
     PauseForPendingOperation();
     primaryLoad_.previousGeneration = before.generation;
+    primaryLoad_.previousSourceKind = before.sourceKind;
     primaryLoad_.adoptRangeOnSuccess = false;
+    primaryLoad_.resetSequenceFrameOffsetOnSuccess = false;
     primaryLoad_.purpose = PendingLoadPurpose::Source;
     return BeginPrimaryLoad(primary_->ReloadFolder());
 }
@@ -242,7 +254,29 @@ bool ComparisonPlayer::Impl::BeginPrimaryLoad(const bool accepted) {
 
 std::optional<ExportSourceSnapshot>
 ComparisonPlayer::Impl::CaptureExportSnapshot() const {
-    return shutdown_ ? std::nullopt : primary_->CaptureExportSnapshot();
+    if (shutdown_) {
+        return std::nullopt;
+    }
+
+    std::optional<ExportSourceSnapshot> snapshot =
+        primary_->CaptureExportSnapshot();
+    if (!snapshot || !comparisonEnabled_) {
+        return snapshot;
+    }
+
+    const PlayerSnapshot primary = primary_->Snapshot();
+    if (!primary.hasSource || primary.totalFrames == 0U) {
+        return std::nullopt;
+    }
+    const PlaybackRange unshiftedRange = detail::NormalizePlaybackRange(
+        rangeIntent_,
+        primary.totalFrames);
+    std::visit(
+        [unshiftedRange](auto& value) {
+            value.inclusiveRange = unshiftedRange;
+        },
+        *snapshot);
+    return snapshot;
 }
 
 bool ComparisonPlayer::Impl::SetComparisonEnabled(const bool enabled) {
@@ -262,6 +296,7 @@ bool ComparisonPlayer::Impl::SetComparisonEnabled(const bool enabled) {
             return false;
         }
         SynchronizeFromSinglePlayer(primary);
+        sequenceFrameOffset_ = 0U;
         try {
             secondary_ = std::make_unique<PlayerEngine>();
         } catch (...) {
@@ -318,6 +353,7 @@ bool ComparisonPlayer::Impl::SetComparisonEnabled(const bool enabled) {
         }
     }
     comparisonEnabled_ = false;
+    sequenceFrameOffset_ = 0U;
     primaryLoad_ = {};
     secondaryLoad_ = {};
     decodeTransaction_ = {};
@@ -381,8 +417,10 @@ bool ComparisonPlayer::Impl::LoadSecondarySource(
     const PlayerSnapshot before = secondary_->Snapshot();
     PauseForPendingOperation();
     secondaryLoad_.previousGeneration = before.generation;
+    secondaryLoad_.previousSourceKind = before.sourceKind;
     secondaryLoad_.adoptRangeOnSuccess = false;
     secondaryLoad_.resetSharedFrameOnSuccess = true;
+    secondaryLoad_.resetSequenceFrameOffsetOnSuccess = true;
     secondaryLoad_.purpose = PendingLoadPurpose::Source;
     const bool accepted = secondary_->LoadSource(sourcePath);
     secondaryLoad_.pending = accepted;

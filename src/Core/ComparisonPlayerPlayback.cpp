@@ -14,31 +14,70 @@ namespace {
 
 [[nodiscard]] bool FrameMatchesTarget(
     const PlayerSnapshot& snapshot,
-    const FrameIndex target) noexcept {
-    return snapshot.hasSource && snapshot.displayFrame != nullptr &&
+    const comparison_detail::LaneFrameMapping mapping) noexcept {
+    return mapping.exists && snapshot.hasSource &&
+        snapshot.displayFrame != nullptr &&
         snapshot.displayFrame->generation == snapshot.generation &&
-        snapshot.displayFrame->index == target;
+        snapshot.displayFrame->index == mapping.sourceFrame;
 }
 
 [[nodiscard]] bool FrameExistsInSource(
     const PlayerSnapshot& snapshot,
-    const FrameIndex target) noexcept {
-    return snapshot.hasSource &&
-        static_cast<std::size_t>(target) < snapshot.totalFrames;
+    const comparison_detail::LaneFrameMapping mapping) noexcept {
+    return snapshot.hasSource && mapping.exists;
 }
 
 [[nodiscard]] bool FrameReadyOrBlack(
     const PlayerSnapshot& snapshot,
-    const FrameIndex target) noexcept {
+    const comparison_detail::LaneFrameMapping mapping) noexcept {
     return snapshot.hasSource &&
-        (!FrameExistsInSource(snapshot, target) ||
-            FrameMatchesTarget(snapshot, target));
+        (!mapping.exists || FrameMatchesTarget(snapshot, mapping));
+}
+
+[[nodiscard]] comparison_detail::SequenceFrameOffsetDomain OffsetDomain(
+    const PlayerSnapshot& primary,
+    const PlayerSnapshot& secondary,
+    const bool comparisonEnabled) noexcept {
+    const bool active = comparisonEnabled &&
+        primary.hasSource && secondary.hasSource;
+    return comparison_detail::ResolveSequenceFrameOffsetDomain(
+        primary.sourceKind,
+        primary.totalFrames,
+        secondary.sourceKind,
+        secondary.totalFrames,
+        active);
+}
+
+[[nodiscard]] comparison_detail::LaneFrameMapping LaneFrame(
+    const PlayerSnapshot& snapshot,
+    const FrameIndex sharedFrame,
+    const bool primaryLane,
+    const comparison_detail::SequenceFrameOffsetDomain domain,
+    const FrameIndex sequenceFrameOffset) noexcept {
+    return comparison_detail::MapSharedFrameToLane(
+        sharedFrame,
+        snapshot.totalFrames,
+        comparison_detail::LaneUsesSequenceFrameOffset(
+            snapshot.sourceKind,
+            primaryLane,
+            domain),
+        sequenceFrameOffset);
 }
 
 [[nodiscard]] PlaybackRange LaneRange(
     const PlaybackRange sharedRange,
-    const std::size_t laneTotalFrames) noexcept {
-    return detail::NormalizePlaybackRange(sharedRange, laneTotalFrames);
+    const PlayerSnapshot& snapshot,
+    const bool primaryLane,
+    const comparison_detail::SequenceFrameOffsetDomain domain,
+    const FrameIndex sequenceFrameOffset) noexcept {
+    return comparison_detail::MapSharedPlaybackRangeToLane(
+        sharedRange,
+        snapshot.totalFrames,
+        comparison_detail::LaneUsesSequenceFrameOffset(
+            snapshot.sourceKind,
+            primaryLane,
+            domain),
+        sequenceFrameOffset);
 }
 
 [[nodiscard]] bool SameRange(
@@ -241,6 +280,12 @@ void ComparisonPlayer::Impl::ProcessPendingLoads(
             const bool succeeded = primary.hasSource &&
                 primary.generation != primaryLoad_.previousGeneration;
             if (succeeded) {
+                if (primaryLoad_.resetSequenceFrameOffsetOnSuccess &&
+                    (primaryLoad_.previousSourceKind ==
+                            SourceKind::PngSequence ||
+                        primary.sourceKind == SourceKind::PngSequence)) {
+                    sequenceFrameOffset_ = 0U;
+                }
                 if (primaryLoad_.adoptRangeOnSuccess ||
                     primaryLoad_.previousGeneration == 0U) {
                     rangeIntent_ = PlaybackRange{
@@ -275,13 +320,24 @@ void ComparisonPlayer::Impl::ProcessPendingLoads(
             const bool succeeded = secondary.hasSource &&
                 secondary.generation != secondaryLoad_.previousGeneration;
             if (succeeded) {
+                if (secondaryLoad_.resetSequenceFrameOffsetOnSuccess &&
+                    (secondaryLoad_.previousSourceKind ==
+                            SourceKind::PngSequence ||
+                        secondary.sourceKind == SourceKind::PngSequence)) {
+                    sequenceFrameOffset_ = 0U;
+                }
                 if (secondaryLoad_.resetSharedFrameOnSuccess) {
-                    const PlaybackRange previousFull = detail::FullPlaybackRange(
-                        commonTotalFrames_ > 0U
-                            ? commonTotalFrames_
-                            : primary.totalFrames);
+                    // rangeIntent_ intentionally retains the unshifted source
+                    // range while a sequence offset is active. Compare the
+                    // effective shared range here so replacing the video with
+                    // a longer source still expands a previously-full
+                    // transport range.
                     const bool rangeFollowedPrimaryFull =
-                        rangeIntent_ == previousFull;
+                        comparison_detail::IsFullSharedPlaybackRange(
+                            effectiveRange_,
+                            commonTotalFrames_ > 0U
+                                ? commonTotalFrames_
+                                : primary.totalFrames);
                     const std::size_t expandedTotal = std::max(
                         primary.totalFrames,
                         secondary.totalFrames);
@@ -334,13 +390,18 @@ void ComparisonPlayer::Impl::ProcessPendingLoads(
 void ComparisonPlayer::Impl::ApplySharedContext(
     const PlayerSnapshot& primary,
     const PlayerSnapshot& secondary) {
+    const comparison_detail::SequenceFrameOffsetDomain offsetDomain =
+        OffsetDomain(primary, secondary, comparisonEnabled_);
     primary_->SetExternalClockEnabled(true);
     primary_->SetFramesPerSecond(framesPerSecond_);
     primary_->SetLoopPlayback(loopPlayback_);
     if (primary.hasSource) {
         const PlaybackRange primaryRange = LaneRange(
             effectiveRange_,
-            primary.totalFrames);
+            primary,
+            true,
+            offsetDomain,
+            sequenceFrameOffset_);
         primary_->SetPlaybackRange(
             primaryRange.startFrame,
             primaryRange.endFrame);
@@ -354,7 +415,10 @@ void ComparisonPlayer::Impl::ApplySharedContext(
         if (secondary.hasSource) {
             const PlaybackRange secondaryRange = LaneRange(
                 effectiveRange_,
-                secondary.totalFrames);
+                secondary,
+                false,
+                offsetDomain,
+                sequenceFrameOffset_);
             secondary_->SetPlaybackRange(
                 secondaryRange.startFrame,
                 secondaryRange.endFrame);
@@ -377,10 +441,21 @@ void ComparisonPlayer::Impl::UpdateSharedDomain(
     const PlayerSnapshot& secondary) {
     const bool active = comparisonEnabled_ &&
         primary.hasSource && secondary.hasSource;
-    commonTotalFrames_ = comparison_detail::CommonTotalFrames(
+    const comparison_detail::SequenceFrameOffsetDomain offsetDomain =
+        OffsetDomain(primary, secondary, comparisonEnabled_);
+    if (offsetDomain.available) {
+        sequenceFrameOffset_ = std::min(
+            sequenceFrameOffset_,
+            offsetDomain.maximum);
+    }
+    commonTotalFrames_ =
+        comparison_detail::CommonTotalFramesWithSequenceOffset(
         primary.totalFrames,
+        primary.sourceKind,
         secondary.totalFrames,
-        active);
+        secondary.sourceKind,
+        active,
+        sequenceFrameOffset_);
     effectiveRange_ = comparison_detail::EffectivePlaybackRange(
         rangeIntent_,
         commonTotalFrames_);
@@ -401,7 +476,10 @@ void ComparisonPlayer::Impl::UpdateSharedDomain(
 
     const PlaybackRange primaryRange = LaneRange(
         effectiveRange_,
-        primary.totalFrames);
+        primary,
+        true,
+        offsetDomain,
+        sequenceFrameOffset_);
     if (primary.hasSource && !SameRange(primary, primaryRange)) {
         primary_->SetPlaybackRange(
             primaryRange.startFrame,
@@ -409,7 +487,10 @@ void ComparisonPlayer::Impl::UpdateSharedDomain(
     }
     const PlaybackRange secondaryRange = LaneRange(
         effectiveRange_,
-        secondary.totalFrames);
+        secondary,
+        false,
+        offsetDomain,
+        sequenceFrameOffset_);
     if (secondary.hasSource && secondary_ &&
         !SameRange(secondary, secondaryRange)) {
         secondary_->SetPlaybackRange(
@@ -424,39 +505,73 @@ void ComparisonPlayer::Impl::BroadcastFrameRequest(
     const PlayerSnapshot& primary,
     const PlayerSnapshot& secondary,
     const bool force) {
-    if (FrameExistsInSource(primary, requestedFrame_) &&
+    const comparison_detail::SequenceFrameOffsetDomain offsetDomain =
+        OffsetDomain(primary, secondary, comparisonEnabled_);
+    const comparison_detail::LaneFrameMapping primaryFrame = LaneFrame(
+        primary,
+        requestedFrame_,
+        true,
+        offsetDomain,
+        sequenceFrameOffset_);
+    const comparison_detail::LaneFrameMapping secondaryFrame = LaneFrame(
+        secondary,
+        requestedFrame_,
+        false,
+        offsetDomain,
+        sequenceFrameOffset_);
+    if (FrameExistsInSource(primary, primaryFrame) &&
         (force || lastPrimaryRequestGeneration_ != primary.generation ||
-            lastPrimaryRequestedFrame_ != requestedFrame_)) {
+            lastPrimaryRequestedFrame_ != primaryFrame.sourceFrame)) {
         if (scrubbing_ && requestKind == FrameRequestKind::InteractiveSeek) {
-            primary_->UpdateScrub(requestedFrame_);
+            primary_->UpdateScrub(primaryFrame.sourceFrame);
         } else {
-            primary_->RequestFrame(requestedFrame_, requestKind, direction);
+            primary_->RequestFrame(
+                primaryFrame.sourceFrame,
+                requestKind,
+                direction);
         }
         lastPrimaryRequestGeneration_ = primary.generation;
-        lastPrimaryRequestedFrame_ = requestedFrame_;
+        lastPrimaryRequestedFrame_ = primaryFrame.sourceFrame;
     }
-    if (secondary_ && FrameExistsInSource(secondary, requestedFrame_) &&
+    if (secondary_ && FrameExistsInSource(secondary, secondaryFrame) &&
         (force || lastSecondaryRequestGeneration_ != secondary.generation ||
-            lastSecondaryRequestedFrame_ != requestedFrame_)) {
+            lastSecondaryRequestedFrame_ != secondaryFrame.sourceFrame)) {
         if (scrubbing_ && requestKind == FrameRequestKind::InteractiveSeek) {
-            secondary_->UpdateScrub(requestedFrame_);
+            secondary_->UpdateScrub(secondaryFrame.sourceFrame);
         } else {
-            secondary_->RequestFrame(requestedFrame_, requestKind, direction);
+            secondary_->RequestFrame(
+                secondaryFrame.sourceFrame,
+                requestKind,
+                direction);
         }
         lastSecondaryRequestGeneration_ = secondary.generation;
-        lastSecondaryRequestedFrame_ = requestedFrame_;
+        lastSecondaryRequestedFrame_ = secondaryFrame.sourceFrame;
     }
 }
 
 bool ComparisonPlayer::Impl::TargetReady(
     const PlayerSnapshot& primary,
     const PlayerSnapshot& secondary) const noexcept {
-    if (!FrameReadyOrBlack(primary, requestedFrame_)) {
+    const comparison_detail::SequenceFrameOffsetDomain offsetDomain =
+        OffsetDomain(primary, secondary, comparisonEnabled_);
+    const comparison_detail::LaneFrameMapping primaryFrame = LaneFrame(
+        primary,
+        requestedFrame_,
+        true,
+        offsetDomain,
+        sequenceFrameOffset_);
+    if (!FrameReadyOrBlack(primary, primaryFrame)) {
         return false;
     }
     const bool active = comparisonEnabled_ &&
         primary.hasSource && secondary.hasSource;
-    return !active || FrameReadyOrBlack(secondary, requestedFrame_);
+    const comparison_detail::LaneFrameMapping secondaryFrame = LaneFrame(
+        secondary,
+        requestedFrame_,
+        false,
+        offsetDomain,
+        sequenceFrameOffset_);
+    return !active || FrameReadyOrBlack(secondary, secondaryFrame);
 }
 
 bool ComparisonPlayer::Impl::CommitPresentedPair(
@@ -473,12 +588,26 @@ bool ComparisonPlayer::Impl::CommitPresentedPair(
         return false;
     }
 
+    const comparison_detail::SequenceFrameOffsetDomain offsetDomain =
+        OffsetDomain(primary, secondary, comparisonEnabled_);
+    const comparison_detail::LaneFrameMapping primaryTarget = LaneFrame(
+        primary,
+        requestedFrame_,
+        true,
+        offsetDomain,
+        sequenceFrameOffset_);
+    const comparison_detail::LaneFrameMapping secondaryTarget = LaneFrame(
+        secondary,
+        requestedFrame_,
+        false,
+        offsetDomain,
+        sequenceFrameOffset_);
     const bool primaryAvailable = FrameExistsInSource(
         primary,
-        requestedFrame_);
+        primaryTarget);
     const bool secondaryAvailable = FrameExistsInSource(
         secondary,
-        requestedFrame_);
+        secondaryTarget);
     const std::shared_ptr<const DecodedFrame> primaryFrame = primaryAvailable
         ? primary.displayFrame
         : std::shared_ptr<const DecodedFrame>{};
@@ -513,10 +642,25 @@ bool ComparisonPlayer::Impl::HasRequestedFrameFailure(
     const PlayerSnapshot& primary,
     const PlayerSnapshot& secondary,
     std::string& detail) const {
-    if (FrameExistsInSource(primary, requestedFrame_) &&
+    const comparison_detail::SequenceFrameOffsetDomain offsetDomain =
+        OffsetDomain(primary, secondary, comparisonEnabled_);
+    const comparison_detail::LaneFrameMapping primaryFrame = LaneFrame(
+        primary,
+        requestedFrame_,
+        true,
+        offsetDomain,
+        sequenceFrameOffset_);
+    const comparison_detail::LaneFrameMapping secondaryFrame = LaneFrame(
+        secondary,
+        requestedFrame_,
+        false,
+        offsetDomain,
+        sequenceFrameOffset_);
+    if (FrameExistsInSource(primary, primaryFrame) &&
+        primary.requestedFrame == primaryFrame.sourceFrame &&
         primary.requestedFrameFailed) {
         detail = "左侧第 " + std::to_string(
-            static_cast<std::uint64_t>(requestedFrame_) + 1U) +
+            static_cast<std::uint64_t>(primaryFrame.sourceFrame) + 1U) +
             " 帧解码失败";
         if (!primary.errorUtf8.empty()) {
             detail += "：" + primary.errorUtf8;
@@ -525,10 +669,11 @@ bool ComparisonPlayer::Impl::HasRequestedFrameFailure(
     }
     const bool active = comparisonEnabled_ &&
         primary.hasSource && secondary.hasSource;
-    if (active && FrameExistsInSource(secondary, requestedFrame_) &&
+    if (active && FrameExistsInSource(secondary, secondaryFrame) &&
+        secondary.requestedFrame == secondaryFrame.sourceFrame &&
         secondary.requestedFrameFailed) {
         detail = "右侧第 " + std::to_string(
-            static_cast<std::uint64_t>(requestedFrame_) + 1U) +
+            static_cast<std::uint64_t>(secondaryFrame.sourceFrame) + 1U) +
             " 帧解码失败";
         if (!secondary.errorUtf8.empty()) {
             detail += "：" + secondary.errorUtf8;
@@ -896,15 +1041,29 @@ void ComparisonPlayer::Impl::UpdateScrub(const FrameIndex frame) {
     playbackFrameAccumulator_ = 0.0;
     ClearComparisonError();
 
-    if (FrameExistsInSource(primary, requestedFrame_)) {
-        primary_->UpdateScrub(requestedFrame_);
+    const comparison_detail::SequenceFrameOffsetDomain offsetDomain =
+        OffsetDomain(primary, secondary, comparisonEnabled_);
+    const comparison_detail::LaneFrameMapping primaryFrame = LaneFrame(
+        primary,
+        requestedFrame_,
+        true,
+        offsetDomain,
+        sequenceFrameOffset_);
+    const comparison_detail::LaneFrameMapping secondaryFrame = LaneFrame(
+        secondary,
+        requestedFrame_,
+        false,
+        offsetDomain,
+        sequenceFrameOffset_);
+    if (FrameExistsInSource(primary, primaryFrame)) {
+        primary_->UpdateScrub(primaryFrame.sourceFrame);
         lastPrimaryRequestGeneration_ = primary.generation;
-        lastPrimaryRequestedFrame_ = requestedFrame_;
+        lastPrimaryRequestedFrame_ = primaryFrame.sourceFrame;
     }
-    if (secondary_ && FrameExistsInSource(secondary, requestedFrame_)) {
-        secondary_->UpdateScrub(requestedFrame_);
+    if (secondary_ && FrameExistsInSource(secondary, secondaryFrame)) {
+        secondary_->UpdateScrub(secondaryFrame.sourceFrame);
         lastSecondaryRequestGeneration_ = secondary.generation;
-        lastSecondaryRequestedFrame_ = requestedFrame_;
+        lastSecondaryRequestedFrame_ = secondaryFrame.sourceFrame;
     }
     statusUtf8_ = "正在同步快速定位目标帧";
 }
@@ -1023,6 +1182,50 @@ void ComparisonPlayer::Impl::SetPlaybackRange(
     statusUtf8_ = "共享播放范围已更新";
 }
 
+void ComparisonPlayer::Impl::SetComparisonSequenceFrameOffset(
+    const FrameIndex offset) {
+    if (shutdown_ || !comparisonEnabled_) {
+        return;
+    }
+    EndScrub();
+
+    PlayerSnapshot primary = primary_->Snapshot();
+    PlayerSnapshot secondary = secondary_
+        ? secondary_->Snapshot()
+        : PlayerSnapshot{};
+    if (HasTrackedPendingOperation() || primary.loading || secondary.loading) {
+        return;
+    }
+
+    const comparison_detail::SequenceFrameOffsetDomain offsetDomain =
+        OffsetDomain(primary, secondary, comparisonEnabled_);
+    if (!offsetDomain.available) {
+        return;
+    }
+
+    const FrameIndex clampedOffset = std::min(offset, offsetDomain.maximum);
+    if (sequenceFrameOffset_ == clampedOffset) {
+        return;
+    }
+
+    sequenceFrameOffset_ = clampedOffset;
+    playbackFrameAccumulator_ = 0.0;
+    pairReady_ = false;
+    ClearComparisonError();
+    UpdateSharedDomain(primary, secondary);
+    primary = primary_->Snapshot();
+    secondary = secondary_ ? secondary_->Snapshot() : PlayerSnapshot{};
+    BroadcastFrameRequest(
+        playing_
+            ? FrameRequestKind::PlaybackAdvance
+            : FrameRequestKind::InteractiveSeek,
+        direction_,
+        primary,
+        secondary,
+        true);
+    statusUtf8_ = "序列对齐偏移已更新";
+}
+
 void ComparisonPlayer::Impl::SetLoopPlayback(const bool enabled) {
     if (shutdown_) {
         return;
@@ -1065,6 +1268,17 @@ ComparisonPlayerSnapshot ComparisonPlayer::Impl::Snapshot() const {
     snapshot.secondary = secondary_ ? secondary_->Snapshot() : PlayerSnapshot{};
     snapshot.active = comparisonEnabled_ &&
         snapshot.primary.hasSource && snapshot.secondary.hasSource;
+    const comparison_detail::SequenceFrameOffsetDomain offsetDomain =
+        OffsetDomain(snapshot.primary, snapshot.secondary, comparisonEnabled_);
+    snapshot.sequenceFrameOffsetAvailable = offsetDomain.available;
+    snapshot.sequenceFrameOffsetOnPrimary = offsetDomain.available &&
+        offsetDomain.onPrimary;
+    snapshot.sequenceFrameOffset = offsetDomain.available
+        ? std::min(sequenceFrameOffset_, offsetDomain.maximum)
+        : 0U;
+    snapshot.maximumSequenceFrameOffset = offsetDomain.available
+        ? offsetDomain.maximum
+        : 0U;
 
     if (!comparisonEnabled_) {
         snapshot.playing = snapshot.primary.playing;

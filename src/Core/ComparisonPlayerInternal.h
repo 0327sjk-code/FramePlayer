@@ -36,6 +36,7 @@ public:
     void Seek(FrameIndex frame);
     void SeekNormalized(double normalizedPosition);
     void SetPlaybackRange(FrameIndex startFrame, FrameIndex endFrame);
+    void SetComparisonSequenceFrameOffset(FrameIndex offset);
     void SetLoopPlayback(bool enabled);
     void SetFramesPerSecond(double framesPerSecond);
     void SetDecodePercent(std::uint32_t percent);
@@ -54,8 +55,10 @@ private:
     struct PendingLoadState final {
         bool pending = false;
         Generation previousGeneration = 0U;
+        SourceKind previousSourceKind = SourceKind::None;
         bool adoptRangeOnSuccess = false;
         bool resetSharedFrameOnSuccess = false;
+        bool resetSequenceFrameOffsetOnSuccess = false;
         PendingLoadPurpose purpose = PendingLoadPurpose::Source;
         std::uint32_t expectedDecodePercent = kDefaultDecodePercent;
     };
@@ -161,6 +164,7 @@ private:
     int direction_ = 1;
 
     FrameIndex requestedFrame_ = 0U;
+    FrameIndex sequenceFrameOffset_ = 0U;
     PlaybackRange rangeIntent_{};
     PlaybackRange effectiveRange_{};
     std::size_t commonTotalFrames_ = 0U;

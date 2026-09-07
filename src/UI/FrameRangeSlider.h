@@ -31,4 +31,15 @@ struct FrameRangeSliderState final {
     float uiScale,
     FrameRangeSliderState& state);
 
+// A single-handle variant used for an inclusive zero-based frame offset. The
+// caller owns commit timing, so dragging can update a local candidate without
+// scheduling source work until the item is released.
+[[nodiscard]] bool FramePositionSlider(
+    InteractionAnimator& animator,
+    const char* label,
+    FrameIndex& frame,
+    FrameIndex maximumFrame,
+    ImVec2 size,
+    float uiScale);
+
 }  // namespace zt::sequence::ui
