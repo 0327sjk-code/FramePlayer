@@ -5,6 +5,7 @@
 #include "Export/ExportTypes.h"
 #include "UI/FrameRangeSlider.h"
 #include "UI/InteractionAnimator.h"
+#include "UI/KeyboardShuttleController.h"
 #include "UI/MaskPreset.h"
 #include "UI/PlayerUI.h"
 #include "UI/ViewportTransform.h"
@@ -297,7 +298,8 @@ private:
 
     void HandleKeyboard(
         ComparisonPlayer& player,
-        const PlayerSnapshot& snapshot);
+        const PlayerSnapshot& snapshot,
+        const ComparisonPlayerSnapshot& comparisonSnapshot);
     void OpenFolder(ComparisonPlayer& player, const UiActions& actions);
     void ReloadFolder(ComparisonPlayer& player);
     [[nodiscard]] ErrorView CurrentError(const PlayerSnapshot& snapshot) const;
@@ -311,6 +313,11 @@ private:
     bool controlsInitialized_ = false;
     float uiScale_ = 1.0F;
     ui::InteractionAnimator interactionAnimator_;
+    ui_detail::KeyboardShuttleController keyboardShuttleController_;
+    bool keyboardSourceContextInitialized_ = false;
+    bool keyboardComparisonEnabled_ = false;
+    Generation keyboardPrimaryGeneration_ = 0U;
+    Generation keyboardSecondaryGeneration_ = 0U;
     int memoryGiB_ = 25;
     std::uint32_t decodePercent_ = 100U;
     std::uint32_t requestedDecodePercent_ = 100U;

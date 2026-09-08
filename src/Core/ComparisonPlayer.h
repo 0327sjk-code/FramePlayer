@@ -78,6 +78,8 @@ public:
     void Tick(double elapsedSeconds);
     void TogglePlayback();
     void SetPlaying(bool playing);
+    void BeginShuttlePlayback(int direction, double speedScale);
+    void EndShuttlePlayback();
     void StepFrame(int delta);
     void BeginScrub();
     void UpdateScrub(FrameIndex frame);

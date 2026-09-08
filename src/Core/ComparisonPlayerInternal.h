@@ -29,6 +29,8 @@ public:
     void Tick(double elapsedSeconds);
     void TogglePlayback();
     void SetPlaying(bool playing);
+    void BeginShuttlePlayback(int direction, double speedScale);
+    void EndShuttlePlayback();
     void StepFrame(int delta);
     void BeginScrub();
     void UpdateScrub(FrameIndex frame);
@@ -99,6 +101,9 @@ private:
     void PauseForPendingOperation();
     void RestorePendingPlaybackAfterRejectedOperation();
     void SetEffectivePlaying(bool playing);
+    void ResetShuttlePlayback() noexcept;
+    [[nodiscard]] PlaybackRange ActiveTransportRange() const noexcept;
+    [[nodiscard]] bool ActiveTransportLoop() const noexcept;
     void MarkUserNavigationDuringPending();
     [[nodiscard]] bool HasTrackedPendingOperation() const noexcept;
     [[nodiscard]] bool DecodeTransactionActive() const noexcept;
@@ -161,6 +166,7 @@ private:
     bool loopPlayback_ = true;
     bool pairReady_ = false;
     bool backgroundResourceMode_ = false;
+    bool shuttlePlayback_ = false;
     int direction_ = 1;
 
     FrameIndex requestedFrame_ = 0U;
@@ -170,6 +176,7 @@ private:
     std::size_t commonTotalFrames_ = 0U;
     double framesPerSecond_ = kDefaultFramesPerSecond;
     double playbackFrameAccumulator_ = 0.0;
+    double playbackSpeedScale_ = 1.0;
     double fpsSampleElapsed_ = 0.0;
     double actualFramesPerSecond_ = 0.0;
     std::uint64_t presentedPairsSinceSample_ = 0U;

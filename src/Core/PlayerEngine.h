@@ -31,6 +31,8 @@ public:
         int direction = 1);
     void TogglePlayback();
     void SetPlaying(bool playing);
+    void BeginShuttlePlayback(int direction, double speedScale);
+    void EndShuttlePlayback();
     void StepFrame(int delta);
     void BeginScrub();
     ScrubUpdateResult UpdateScrub(FrameIndex frame);

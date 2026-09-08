@@ -795,6 +795,232 @@ template <typename Predicate>
     return passed;
 }
 
+[[nodiscard]] bool TestSingleSourceShuttlePlayback() {
+    constexpr std::size_t kFrameCount = 12U;
+    constexpr double kTargetFramesPerSecond = 60.0;
+    constexpr double kShuttleSpeedScale = 0.80;
+
+    bool passed = true;
+    TemporaryComparisonSequences sequences;
+    passed &= Expect(
+        sequences.WritePrimaryFrames(kFrameCount),
+        "write single-source shuttle frames");
+    if (!passed) {
+        return false;
+    }
+
+    ComparisonPlayer player;
+    ComparisonPlayerSnapshot snapshot;
+    passed &= Expect(
+        player.LoadFolder(sequences.Primary()),
+        "load single-source shuttle sequence");
+    passed &= Expect(
+        WaitFor(
+            player,
+            snapshot,
+            [kFrameCount](const ComparisonPlayerSnapshot& value) {
+                return value.primary.hasSource && !value.primary.loading &&
+                    value.primary.cachedFrames >= kFrameCount;
+            }),
+        "fully cache single-source shuttle sequence");
+    if (!passed) {
+        player.Shutdown();
+        return false;
+    }
+
+    player.SetFramesPerSecond(kTargetFramesPerSecond);
+    player.SetPlaybackRange(4U, 6U);
+    player.SetLoopPlayback(true);
+    player.Seek(5U);
+    snapshot = player.Snapshot();
+    passed &= Expect(
+        snapshot.currentFrame == 5U && snapshot.requestedFrame == 5U &&
+            snapshot.playbackStartFrame == 4U &&
+            snapshot.playbackEndFrame == 6U,
+        "prepare a cached frame inside the custom playback range");
+
+    player.BeginShuttlePlayback(1, kShuttleSpeedScale);
+    snapshot = player.Snapshot();
+    passed &= Expect(
+        snapshot.playing &&
+            snapshot.targetFramesPerSecond == kTargetFramesPerSecond,
+        "forward shuttle starts without changing the configured 60 fps");
+
+    player.Tick(0.020);
+    snapshot = player.Snapshot();
+    passed &= Expect(
+        snapshot.requestedFrame == 5U,
+        "60 fps shuttle does not advance before the 48 fps interval");
+    player.Tick(0.001);
+    snapshot = player.Snapshot();
+    passed &= Expect(
+        snapshot.requestedFrame == 6U && snapshot.currentFrame == 6U,
+        "60 fps times 0.8 advances one cached frame after 21 ms");
+    player.Tick(0.021);
+    snapshot = player.Snapshot();
+    passed &= Expect(
+        snapshot.requestedFrame == 7U && snapshot.currentFrame == 7U &&
+            snapshot.playing,
+        "forward shuttle crosses the custom end in the full source domain");
+
+    player.EndShuttlePlayback();
+    snapshot = player.Snapshot();
+    const FrameIndex frameAtForwardRelease = snapshot.requestedFrame;
+    passed &= Expect(
+        !snapshot.playing && frameAtForwardRelease == 7U,
+        "ending forward shuttle pauses on its current frame");
+    player.Tick(0.500);
+    snapshot = player.Snapshot();
+    passed &= Expect(
+        !snapshot.playing &&
+            snapshot.requestedFrame == frameAtForwardRelease,
+        "ended shuttle remains paused when the clock continues");
+
+    player.BeginShuttlePlayback(-1, kShuttleSpeedScale);
+    player.Tick(0.020);
+    snapshot = player.Snapshot();
+    passed &= Expect(
+        snapshot.requestedFrame == 7U,
+        "reverse shuttle also waits for the 48 fps interval");
+    player.Tick(0.001);
+    snapshot = player.Snapshot();
+    passed &= Expect(
+        snapshot.requestedFrame == 6U && snapshot.currentFrame == 6U &&
+            snapshot.playing,
+        "60 fps times 0.8 advances one cached frame in reverse");
+    player.EndShuttlePlayback();
+    passed &= Expect(
+        !player.Snapshot().playing,
+        "ending reverse shuttle pauses playback");
+
+    player.Seek(static_cast<FrameIndex>(kFrameCount - 1U));
+    player.BeginShuttlePlayback(1, kShuttleSpeedScale);
+    player.Tick(0.021);
+    snapshot = player.Snapshot();
+    passed &= Expect(
+        snapshot.requestedFrame == kFrameCount - 1U && !snapshot.playing,
+        "shuttle stops at the source end even when loop playback is enabled");
+
+    player.Seek(0U);
+    player.BeginShuttlePlayback(-1, kShuttleSpeedScale);
+    player.Tick(0.021);
+    snapshot = player.Snapshot();
+    passed &= Expect(
+        snapshot.requestedFrame == 0U && !snapshot.playing,
+        "reverse shuttle stops at the source start instead of looping");
+
+    player.Seek(6U);
+    player.SetPlaying(true);
+    player.Tick(0.017);
+    snapshot = player.Snapshot();
+    passed &= Expect(
+        snapshot.requestedFrame == 4U && snapshot.currentFrame == 4U &&
+            snapshot.playing,
+        "ordinary playback restores 60 fps and custom-range looping after shuttle");
+
+    player.SetPlaying(false);
+    player.Shutdown();
+    return passed;
+}
+
+[[nodiscard]] bool TestComparisonShuttleSynchronization() {
+    constexpr std::size_t kPrimaryFrameCount = 8U;
+    constexpr std::size_t kSecondaryFrameCount = 3U;
+    constexpr double kTargetFramesPerSecond = 60.0;
+    constexpr double kShuttleSpeedScale = 0.80;
+
+    bool passed = true;
+    TemporaryComparisonSequences sequences;
+    passed &= Expect(
+        sequences.WritePrimaryFrames(kPrimaryFrameCount),
+        "write comparison shuttle primary frames");
+    passed &= Expect(
+        sequences.WriteSecondaryFrames(kSecondaryFrameCount),
+        "write comparison shuttle secondary frames");
+    if (!passed) {
+        return false;
+    }
+
+    ComparisonPlayer player;
+    ComparisonPlayerSnapshot snapshot;
+    passed &= Expect(
+        LoadActiveComparison(player, sequences, snapshot),
+        "load active comparison for shuttle playback");
+    passed &= Expect(
+        WaitFor(
+            player,
+            snapshot,
+            [kPrimaryFrameCount, kSecondaryFrameCount](
+                const ComparisonPlayerSnapshot& value) {
+                return value.active && value.pairReady &&
+                    value.primary.cachedFrames >= kPrimaryFrameCount &&
+                    value.secondary.cachedFrames >= kSecondaryFrameCount;
+            }),
+        "fully cache both comparison shuttle lanes");
+    if (!passed) {
+        player.Shutdown();
+        return false;
+    }
+
+    player.SetFramesPerSecond(kTargetFramesPerSecond);
+    player.SetPlaybackRange(1U, 2U);
+    player.SetLoopPlayback(true);
+    player.Seek(0U);
+    player.BeginShuttlePlayback(1, kShuttleSpeedScale);
+    player.Tick(0.105);
+    snapshot = player.Snapshot();
+    passed &= Expect(
+        snapshot.playing && snapshot.pairReady &&
+            snapshot.currentFrame == 5U && snapshot.requestedFrame == 5U &&
+            snapshot.primaryFrameAvailable &&
+            snapshot.primaryDisplayFrame != nullptr &&
+            snapshot.primaryDisplayFrame->index == 5U,
+        "comparison shuttle advances the shared clock five frames at 48 fps");
+    passed &= Expect(
+        !snapshot.secondaryFrameAvailable &&
+            snapshot.secondaryDisplayFrame == nullptr,
+        "comparison shuttle commits black after the short lane ends");
+    passed &= Expect(
+        !snapshot.sequenceFrameOffsetAvailable &&
+            snapshot.sequenceFrameOffset == 0U,
+        "two-sequence shuttle leaves the unavailable offset domain unchanged");
+
+    player.EndShuttlePlayback();
+    passed &= Expect(
+        !player.Snapshot().playing,
+        "ending comparison shuttle pauses the shared transport");
+
+    player.BeginShuttlePlayback(-1, kShuttleSpeedScale);
+    player.Tick(0.063);
+    snapshot = player.Snapshot();
+    passed &= Expect(
+        snapshot.playing && snapshot.pairReady &&
+            snapshot.currentFrame == 2U && snapshot.requestedFrame == 2U &&
+            snapshot.primaryFrameAvailable &&
+            snapshot.secondaryFrameAvailable &&
+            snapshot.primaryDisplayFrame != nullptr &&
+            snapshot.secondaryDisplayFrame != nullptr &&
+            snapshot.primaryDisplayFrame->index == 2U &&
+            snapshot.secondaryDisplayFrame->index == 2U,
+        "reverse shuttle restores one synchronized pair from the short lane");
+    player.EndShuttlePlayback();
+
+    player.Seek(static_cast<FrameIndex>(kPrimaryFrameCount - 1U));
+    player.BeginShuttlePlayback(1, kShuttleSpeedScale);
+    player.Tick(0.021);
+    snapshot = player.Snapshot();
+    passed &= Expect(
+        !snapshot.playing && snapshot.pairReady &&
+            snapshot.currentFrame == kPrimaryFrameCount - 1U &&
+            snapshot.requestedFrame == kPrimaryFrameCount - 1U &&
+            snapshot.primaryFrameAvailable &&
+            !snapshot.secondaryFrameAvailable,
+        "comparison shuttle stops without looping at the full shared source end");
+
+    player.Shutdown();
+    return passed;
+}
+
 }  // namespace
 
 int main() {
@@ -949,5 +1175,7 @@ int main() {
     passed &= TestRejectComparisonEnableDuringPrimaryPending();
     passed &= TestBackgroundResourceMode();
     passed &= TestSequenceFrameOffsetNoOpForTwoSequences();
+    passed &= TestSingleSourceShuttlePlayback();
+    passed &= TestComparisonShuttleSynchronization();
     return passed ? 0 : 1;
 }

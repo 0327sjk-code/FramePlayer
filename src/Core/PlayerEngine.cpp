@@ -50,6 +50,16 @@ void PlayerEngine::SetPlaying(const bool playing) {
     impl_->SetPlaying(playing);
 }
 
+void PlayerEngine::BeginShuttlePlayback(
+    const int direction,
+    const double speedScale) {
+    impl_->BeginShuttlePlayback(direction, speedScale);
+}
+
+void PlayerEngine::EndShuttlePlayback() {
+    impl_->EndShuttlePlayback();
+}
+
 void PlayerEngine::StepFrame(const int delta) {
     impl_->StepFrame(delta);
 }

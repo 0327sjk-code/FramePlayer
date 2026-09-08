@@ -170,7 +170,7 @@ void PlayerUI::Impl::Render(
             actions,
             error,
             bottomHeight);
-        HandleKeyboard(player, snapshot);
+        HandleKeyboard(player, snapshot, comparisonSnapshot);
     }
     ImGui::End();
     ImGui::PopStyleVar(3);
@@ -371,14 +371,26 @@ void PlayerUI::Impl::UploadDisplayFrame(
 
 void PlayerUI::Impl::HandleKeyboard(
     ComparisonPlayer& player,
-    const PlayerSnapshot& snapshot) {
+    const PlayerSnapshot& snapshot,
+    const ComparisonPlayerSnapshot& comparisonSnapshot) {
     constexpr ImGuiPopupFlags anyPopupFlags =
         ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel;
 
     const ImGuiIO& io = ImGui::GetIO();
+    const bool sourceContextChanged = !keyboardSourceContextInitialized_ ||
+        keyboardComparisonEnabled_ != comparisonSnapshot.enabled ||
+        keyboardPrimaryGeneration_ != comparisonSnapshot.primary.generation ||
+        keyboardSecondaryGeneration_ != comparisonSnapshot.secondary.generation;
+    keyboardSourceContextInitialized_ = true;
+    keyboardComparisonEnabled_ = comparisonSnapshot.enabled;
+    keyboardPrimaryGeneration_ = comparisonSnapshot.primary.generation;
+    keyboardSecondaryGeneration_ = comparisonSnapshot.secondary.generation;
+
+    const bool eitherSourceLoading = comparisonSnapshot.primary.loading ||
+        comparisonSnapshot.secondary.loading;
     const ui_detail::KeyboardRoutingState routingState{
         snapshot.hasSource,
-        snapshot.loading,
+        eitherSourceLoading,
         ImGui::IsPopupOpen(nullptr, anyPopupFlags),
         io.WantTextInput,
         ImGui::IsAnyItemActive()};
@@ -391,7 +403,32 @@ void PlayerUI::Impl::HandleKeyboard(
         ImGui::IsKeyPressed(ImGuiKey_End, false),
         ImGui::IsKeyPressed(ImGuiKey_L, false)};
 
-    switch (ui_detail::ResolvePlayerHotkeyCommand(routingState, pressed)) {
+    ui_detail::PlayerHotkeyPressState routedPresses = pressed;
+    if (pressed.home || pressed.end || pressed.loop) {
+        routedPresses.left = false;
+        routedPresses.right = false;
+    }
+    const ui_detail::PlayerHotkeyCommand command =
+        ui_detail::ResolvePlayerHotkeyCommand(routingState, routedPresses);
+    const bool nonDirectionalCommandPressed = pressed.space || pressed.home ||
+        pressed.end || pressed.loop;
+    const ui_detail::KeyboardShuttleInput shuttleInput{
+        ui_detail::ShouldHandleNavigationHotkeys(routingState),
+        io.AppFocusLost || sourceContextChanged ||
+            nonDirectionalCommandPressed ||
+            (keyboardShuttleController_.IsActive() && !snapshot.playing),
+        pressed.left,
+        pressed.right,
+        ImGui::IsKeyDown(ImGuiKey_LeftArrow),
+        ImGui::IsKeyDown(ImGuiKey_RightArrow),
+        static_cast<double>(io.DeltaTime)};
+    const ui_detail::KeyboardShuttleAction shuttleAction =
+        keyboardShuttleController_.Update(shuttleInput);
+    if (shuttleAction.endShuttle) {
+        player.EndShuttlePlayback();
+    }
+
+    switch (command) {
     case ui_detail::PlayerHotkeyCommand::TogglePlayback:
         // Use the frame-start snapshot as the single source of truth. If the
         // transport button and Space arrive in the same UI frame, both resolve
@@ -399,13 +436,8 @@ void PlayerUI::Impl::HandleKeyboard(
         player.SetPlaying(!snapshot.playing);
         return;
     case ui_detail::PlayerHotkeyCommand::StepBackward:
-        player.SetPlaying(false);
-        player.StepFrame(-1);
-        return;
     case ui_detail::PlayerHotkeyCommand::StepForward:
-        player.SetPlaying(false);
-        player.StepFrame(1);
-        return;
+        break;
     case ui_detail::PlayerHotkeyCommand::SeekPlaybackStart:
         player.SetPlaying(false);
         player.Seek(snapshot.playbackStartFrame);
@@ -418,7 +450,18 @@ void PlayerUI::Impl::HandleKeyboard(
         player.SetLoopPlayback(!snapshot.loopPlayback);
         return;
     case ui_detail::PlayerHotkeyCommand::None:
+        break;
+    }
+
+    if (shuttleAction.stepDirection != 0) {
+        player.SetPlaying(false);
+        player.StepFrame(shuttleAction.stepDirection);
         return;
+    }
+    if (shuttleAction.beginDirection != 0) {
+        player.BeginShuttlePlayback(
+            shuttleAction.beginDirection,
+            ui_detail::kKeyboardShuttlePlaybackRate);
     }
 }
 

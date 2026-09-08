@@ -298,6 +298,7 @@ void PlayerEngine::Impl::Shutdown() {
         }
         shutdown_ = true;
         playing_ = false;
+        ResetShuttlePlaybackLocked();
         scrubbing_ = false;
         scrubGeneration_ = 0U;
         postScrubHotFillActive_ = false;
@@ -562,6 +563,7 @@ void PlayerEngine::Impl::OnDecodeCompleted(ScheduledDecodeResult result) {
                 pendingLoad_->playbackRangeCustomized;
             pendingLoad_.reset();
             playing_ = false;
+            ResetShuttlePlaybackLocked();
             scrubbing_ = false;
             scrubGeneration_ = 0U;
             postScrubHotFillActive_ = false;

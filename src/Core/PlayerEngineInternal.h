@@ -49,6 +49,8 @@ public:
         int direction);
     void TogglePlayback();
     void SetPlaying(bool playing);
+    void BeginShuttlePlayback(int direction, double speedScale);
+    void EndShuttlePlayback();
     void StepFrame(int delta);
     void BeginScrub();
     ScrubUpdateResult UpdateScrub(FrameIndex frame);
@@ -125,6 +127,9 @@ private:
     void SetBackgroundConcurrency(std::size_t maximumConcurrentTasks);
     void ApplyCacheCapacityLocked(std::uint64_t capacityBytes);
     void CancelPostScrubHotFillLocked();
+    void ResetShuttlePlaybackLocked() noexcept;
+    [[nodiscard]] PlaybackRange ActiveTransportRangeLocked() const noexcept;
+    [[nodiscard]] bool ActiveTransportLoopLocked() const noexcept;
     void PresentRequestedFromCacheLocked();
     [[nodiscard]] bool IsPostScrubHotFillSatisfiedLocked() const;
     void ScheduleScrubTarget();
@@ -147,6 +152,7 @@ private:
     bool scrubbing_ = false;
     bool buffering_ = false;
     bool backgroundResourceMode_ = false;
+    bool shuttlePlayback_ = false;
     int direction_ = 1;
     Generation nextGeneration_ = 1;
     Generation scrubGeneration_ = 0;
@@ -170,6 +176,7 @@ private:
     std::uint32_t decodedHeight_ = 0;
 
     double playbackFrameAccumulator_ = 0.0;
+    double playbackSpeedScale_ = 1.0;
     double sequenceFramesPerSecond_ = kDefaultFramesPerSecond;
     double fpsSampleElapsed_ = 0.0;
     double actualFramesPerSecond_ = 0.0;

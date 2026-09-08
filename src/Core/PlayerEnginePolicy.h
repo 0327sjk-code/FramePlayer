@@ -13,6 +13,10 @@
 
 namespace zt::sequence::detail {
 
+inline constexpr double kNormalPlaybackSpeedScale = 1.0;
+inline constexpr double kMinimumPlaybackSpeedScale = 0.05;
+inline constexpr double kMaximumPlaybackSpeedScale = 4.0;
+
 inline constexpr std::uint64_t kMiB = 1024ULL * 1024ULL;
 inline constexpr std::uint64_t kTransientMemoryReserveBytes = 512ULL * kMiB;
 inline constexpr std::uint64_t kMinimumAcceptedMemoryLimitBytes = 256ULL * kMiB;

@@ -157,6 +157,19 @@ if(ZT_BUILD_TESTS)
     target_compile_options(ZTPlayerUILogicTests PRIVATE /WX)
     add_test(NAME PlayerUILogic COMMAND ZTPlayerUILogicTests)
 
+    add_executable(ZTKeyboardShuttleControllerTests
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/KeyboardShuttleControllerTests.cpp"
+    )
+    target_include_directories(ZTKeyboardShuttleControllerTests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    zt_configure_project_target(ZTKeyboardShuttleControllerTests)
+    target_compile_options(ZTKeyboardShuttleControllerTests PRIVATE /WX)
+    add_test(
+        NAME KeyboardShuttleController
+        COMMAND ZTKeyboardShuttleControllerTests
+    )
+
     add_executable(ZTCoreLogicTests
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/CoreLogicTests.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/Cache/MemoryFrameCache.cpp"

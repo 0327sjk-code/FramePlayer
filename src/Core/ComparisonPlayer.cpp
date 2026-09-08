@@ -56,6 +56,16 @@ void ComparisonPlayer::SetPlaying(const bool playing) {
     impl_->SetPlaying(playing);
 }
 
+void ComparisonPlayer::BeginShuttlePlayback(
+    const int direction,
+    const double speedScale) {
+    impl_->BeginShuttlePlayback(direction, speedScale);
+}
+
+void ComparisonPlayer::EndShuttlePlayback() {
+    impl_->EndShuttlePlayback();
+}
+
 void ComparisonPlayer::StepFrame(const int delta) {
     impl_->StepFrame(delta);
 }
@@ -140,6 +150,7 @@ bool ComparisonPlayer::Impl::DecodeTransactionActive() const noexcept {
 }
 
 void ComparisonPlayer::Impl::SetEffectivePlaying(const bool playing) {
+    ResetShuttlePlayback();
     playing_ = playing;
     playbackFrameAccumulator_ = 0.0;
     primary_->SetPlaying(playing);
@@ -148,9 +159,25 @@ void ComparisonPlayer::Impl::SetEffectivePlaying(const bool playing) {
     }
 }
 
+void ComparisonPlayer::Impl::ResetShuttlePlayback() noexcept {
+    shuttlePlayback_ = false;
+    playbackSpeedScale_ = detail::kNormalPlaybackSpeedScale;
+}
+
+PlaybackRange ComparisonPlayer::Impl::ActiveTransportRange() const noexcept {
+    return shuttlePlayback_
+        ? detail::FullPlaybackRange(commonTotalFrames_)
+        : effectiveRange_;
+}
+
+bool ComparisonPlayer::Impl::ActiveTransportLoop() const noexcept {
+    return !shuttlePlayback_ && loopPlayback_;
+}
+
 void ComparisonPlayer::Impl::PauseForPendingOperation() {
+    const bool resumeNormalPlayback = playing_ && !shuttlePlayback_;
     if (!pendingPlaybackIntent_) {
-        pendingPlaybackIntent_ = playing_;
+        pendingPlaybackIntent_ = resumeNormalPlayback;
     }
     SetEffectivePlaying(false);
 }
@@ -178,6 +205,7 @@ bool ComparisonPlayer::Impl::LoadFolder(
         return false;
     }
     EndScrub();
+    EndShuttlePlayback();
     if (!comparisonEnabled_) {
         return primary_->LoadFolder(folder);
     }
@@ -202,6 +230,7 @@ bool ComparisonPlayer::Impl::LoadSource(
         return false;
     }
     EndScrub();
+    EndShuttlePlayback();
     if (!comparisonEnabled_) {
         return primary_->LoadSource(sourcePath);
     }
@@ -225,6 +254,7 @@ bool ComparisonPlayer::Impl::ReloadFolder() {
         return false;
     }
     EndScrub();
+    EndShuttlePlayback();
     if (!comparisonEnabled_) {
         return primary_->ReloadFolder();
     }
@@ -287,6 +317,7 @@ bool ComparisonPlayer::Impl::SetComparisonEnabled(const bool enabled) {
     if (comparisonEnabled_ == enabled) {
         return true;
     }
+    EndShuttlePlayback();
 
     if (enabled) {
         const PlayerSnapshot primary = primary_->Snapshot();
@@ -403,6 +434,7 @@ bool ComparisonPlayer::Impl::LoadSecondarySource(
         return false;
     }
     EndScrub();
+    EndShuttlePlayback();
     if (!comparisonEnabled_ && !SetComparisonEnabled(true)) {
         return false;
     }
@@ -517,6 +549,8 @@ void ComparisonPlayer::Impl::Shutdown() {
     shutdown_ = true;
     playing_ = false;
     scrubbing_ = false;
+    playbackFrameAccumulator_ = 0.0;
+    ResetShuttlePlayback();
     std::unique_ptr<PlayerEngine> secondaryToShutdown =
         std::move(secondary_);
     std::optional<std::jthread> secondaryShutdownWorker;

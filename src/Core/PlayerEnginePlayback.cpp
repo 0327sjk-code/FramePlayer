@@ -13,6 +13,24 @@
 
 namespace zt::sequence {
 
+void PlayerEngine::Impl::ResetShuttlePlaybackLocked() noexcept {
+    shuttlePlayback_ = false;
+    playbackSpeedScale_ = detail::kNormalPlaybackSpeedScale;
+}
+
+PlaybackRange PlayerEngine::Impl::ActiveTransportRangeLocked() const noexcept {
+    if (!activeSession_) {
+        return {};
+    }
+    return shuttlePlayback_
+        ? detail::FullPlaybackRange(activeSession_->TotalFrames())
+        : playbackRange_;
+}
+
+bool PlayerEngine::Impl::ActiveTransportLoopLocked() const noexcept {
+    return !shuttlePlayback_ && settings_.loopPlayback;
+}
+
 void PlayerEngine::Impl::Tick(const double elapsedSeconds) {
     if (!std::isfinite(elapsedSeconds) || elapsedSeconds < 0.0) {
         return;
@@ -51,7 +69,8 @@ void PlayerEngine::Impl::Tick(const double elapsedSeconds) {
             return;
         }
 
-        playbackFrameAccumulator_ += elapsedSeconds * settings_.framesPerSecond;
+        playbackFrameAccumulator_ += elapsedSeconds *
+            settings_.framesPerSecond * playbackSpeedScale_;
         const double wholeSteps = std::floor(playbackFrameAccumulator_);
         if (wholeSteps < 1.0) {
             return;
@@ -70,12 +89,14 @@ void PlayerEngine::Impl::Tick(const double elapsedSeconds) {
         }
 
         const std::int64_t signedSteps = direction_ < 0 ? -stepCount : stepCount;
+        const PlaybackRange transportRange = ActiveTransportRangeLocked();
+        const bool transportLoop = ActiveTransportLoopLocked();
         const std::optional<FrameIndex> target =
             detail::OffsetFrameInPlaybackRange(
             requestedFrame_,
             signedSteps,
-            playbackRange_,
-            settings_.loopPlayback);
+            transportRange,
+            transportLoop);
         if (target) {
             requestedFrame_ = *target;
         } else {
@@ -83,13 +104,15 @@ void PlayerEngine::Impl::Tick(const double elapsedSeconds) {
                 + signedSteps;
             requestedFrame_ = detail::ClampFrameToPlaybackRange(
                 unclamped,
-                playbackRange_);
+                transportRange);
             playing_ = false;
             stoppedPlayback = true;
             playbackFrameAccumulator_ = 0.0;
+            const bool endedShuttle = shuttlePlayback_;
+            ResetShuttlePlaybackLocked();
             statusUtf8_ = direction_ < 0
-                ? "已到播放起始帧"
-                : "已到播放结束帧";
+                ? (endedShuttle ? "已到素材起始帧" : "已到播放起始帧")
+                : (endedShuttle ? "已到素材结束帧" : "已到播放结束帧");
         }
 
         PresentRequestedFromCacheLocked();
@@ -137,6 +160,7 @@ void PlayerEngine::Impl::RequestFrame(
         }
         if (requestKind == FrameRequestKind::InteractiveSeek) {
             CancelPostScrubHotFillLocked();
+            ResetShuttlePlaybackLocked();
         }
 
         const FrameIndex target = std::min<FrameIndex>(
@@ -173,6 +197,7 @@ void PlayerEngine::Impl::TogglePlayback() {
         if (shutdown_ || !activeSession_) {
             return;
         }
+        ResetShuttlePlaybackLocked();
         playing_ = !playing_;
         if (playing_) {
             direction_ = 1;
@@ -209,6 +234,7 @@ void PlayerEngine::Impl::SetPlaying(const bool playing) {
         if (shutdown_ || (playing && !activeSession_)) {
             return;
         }
+        ResetShuttlePlaybackLocked();
         playing_ = playing;
         if (playing_ && activeSession_) {
             direction_ = 1;
@@ -233,6 +259,71 @@ void PlayerEngine::Impl::SetPlaying(const bool playing) {
     ScheduleWork();
 }
 
+void PlayerEngine::Impl::BeginShuttlePlayback(
+    const int direction,
+    const double speedScale) {
+    if (direction == 0 || !std::isfinite(speedScale) || speedScale <= 0.0) {
+        return;
+    }
+
+    EndScrub();
+    bool started = false;
+    Generation generation = 0U;
+    {
+        std::scoped_lock lock(mutex_);
+        if (shutdown_ || backgroundResourceMode_ || !activeSession_ ||
+            activeSession_->TotalFrames() == 0U) {
+            return;
+        }
+
+        CancelPostScrubHotFillLocked();
+        shuttlePlayback_ = true;
+        playing_ = true;
+        direction_ = direction < 0 ? -1 : 1;
+        playbackSpeedScale_ = std::clamp(
+            speedScale,
+            detail::kMinimumPlaybackSpeedScale,
+            detail::kMaximumPlaybackSpeedScale);
+        playbackFrameAccumulator_ = 0.0;
+        requestedFrame_ = detail::ClampFrameToPlaybackRange(
+            static_cast<std::int64_t>(requestedFrame_),
+            detail::FullPlaybackRange(activeSession_->TotalFrames()));
+        generation = activeSession_->generation;
+        PresentRequestedFromCacheLocked();
+        snapshotTelemetry_.initialized = false;
+        statusUtf8_ = direction_ < 0
+            ? "方向键反向快览"
+            : "方向键正向快览";
+        started = true;
+    }
+
+    if (started) {
+        CancelInteractive(generation);
+        SetBackgroundConcurrency(detail::kPlayingBackgroundConcurrency);
+        ScheduleWork();
+    }
+}
+
+void PlayerEngine::Impl::EndShuttlePlayback() {
+    bool ended = false;
+    {
+        std::scoped_lock lock(mutex_);
+        if (shutdown_ || !shuttlePlayback_) {
+            return;
+        }
+        playing_ = false;
+        playbackFrameAccumulator_ = 0.0;
+        ResetShuttlePlaybackLocked();
+        snapshotTelemetry_.initialized = false;
+        statusUtf8_ = "方向键快览已暂停";
+        ended = true;
+    }
+    if (ended) {
+        SetBackgroundConcurrency(detail::kPausedBackgroundConcurrency);
+        ScheduleWork();
+    }
+}
+
 void PlayerEngine::Impl::StepFrame(const int delta) {
     if (delta == 0) {
         return;
@@ -247,6 +338,7 @@ void PlayerEngine::Impl::StepFrame(const int delta) {
             return;
         }
         CancelPostScrubHotFillLocked();
+        ResetShuttlePlaybackLocked();
         playing_ = false;
         playbackFrameAccumulator_ = 0.0;
         direction_ = delta < 0 ? -1 : 1;
@@ -278,6 +370,7 @@ void PlayerEngine::Impl::BeginScrub() {
         scrubGeneration_ = generation;
         postScrubHotFillActive_ = false;
         postScrubHotFillGeneration_ = 0U;
+        ResetShuttlePlaybackLocked();
         playing_ = false;
         playbackFrameAccumulator_ = 0.0;
         PresentRequestedFromCacheLocked();
@@ -389,6 +482,7 @@ void PlayerEngine::Impl::Seek(const FrameIndex frame) {
             return;
         }
         CancelPostScrubHotFillLocked();
+        ResetShuttlePlaybackLocked();
         playing_ = false;
         playbackFrameAccumulator_ = 0.0;
         requestedFrame_ = std::min<FrameIndex>(
@@ -464,7 +558,7 @@ void PlayerEngine::Impl::SetPlaybackRange(
         }
         targetChanged = true;
         generation = activeSession_->generation;
-        if (playing_ &&
+        if (playing_ && !shuttlePlayback_ &&
             !detail::PlaybackRangeContains(playbackRange_, requestedFrame_)) {
             requestedFrame_ = playbackRange_.startFrame;
             PresentRequestedFromCacheLocked();
@@ -657,6 +751,7 @@ void PlayerEngine::Impl::SetBackgroundResourceMode(const bool enabled) {
         }
         backgroundResourceMode_ = enabled;
         if (enabled) {
+            ResetShuttlePlaybackLocked();
             playing_ = false;
             playbackFrameAccumulator_ = 0.0;
             CancelPostScrubHotFillLocked();
@@ -723,8 +818,11 @@ PlayerSnapshot PlayerEngine::Impl::Snapshot() const {
         ? activeSession_->generation
         : 0U;
     const PlaybackRange telemetryRange = activeSession_
-        ? playbackRange_
+        ? ActiveTransportRangeLocked()
         : PlaybackRange{};
+    const bool telemetryLoopPlayback = activeSession_
+        ? ActiveTransportLoopLocked()
+        : false;
     const auto telemetryNow = std::chrono::steady_clock::now();
     if (detail::ShouldRefreshSnapshotTelemetry(
             snapshotTelemetry_.initialized,
@@ -733,12 +831,12 @@ PlayerSnapshot PlayerEngine::Impl::Snapshot() const {
             snapshotTelemetry_.playbackRange,
             telemetryRange,
             snapshotTelemetry_.loopPlayback,
-            settings_.loopPlayback,
+            telemetryLoopPlayback,
             telemetryNow - snapshotTelemetry_.sampledAt)) {
         snapshotTelemetry_.initialized = true;
         snapshotTelemetry_.generation = telemetryGeneration;
         snapshotTelemetry_.playbackRange = telemetryRange;
-        snapshotTelemetry_.loopPlayback = settings_.loopPlayback;
+        snapshotTelemetry_.loopPlayback = telemetryLoopPlayback;
         snapshotTelemetry_.sampledAt = telemetryNow;
         snapshotTelemetry_.cacheCapacityBytes = cache_.CapacityBytes();
         snapshotTelemetry_.cacheBytes = cache_.SizeBytes();
@@ -756,7 +854,7 @@ PlayerSnapshot PlayerEngine::Impl::Snapshot() const {
                 readyStart,
                 1,
                 telemetryRange,
-                settings_.loopPlayback,
+                telemetryLoopPlayback,
                 static_cast<std::size_t>(
                     detail::PlaybackRangeFrameCount(telemetryRange)));
         }

@@ -211,9 +211,14 @@ void PlayerEngine::Impl::ScheduleWork() {
                 postScrubHotFill = false;
             }
         }
-        const PlaybackRange hotRange = playing_ || postScrubHotFill
-            ? playbackRange_
-            : detail::FullPlaybackRange(totalFrames);
+        const PlaybackRange hotRange = playing_
+            ? ActiveTransportRangeLocked()
+            : (postScrubHotFill
+                ? playbackRange_
+                : detail::FullPlaybackRange(totalFrames));
+        const bool hotRangeLoops = playing_
+            ? ActiveTransportLoopLocked()
+            : settings_.loopPlayback;
         const FrameIndex hotStartFrame = postScrubHotFill
             ? postScrubHotFillStartFrame_
             : requestedFrame_;
@@ -317,7 +322,7 @@ void PlayerEngine::Impl::ScheduleWork() {
                     ? -static_cast<std::int64_t>(distance)
                     : static_cast<std::int64_t>(distance),
                 hotRange,
-                settings_.loopPlayback);
+                hotRangeLoops);
             if (!index || *index == hotStartFrame) {
                 break;
             }
@@ -348,7 +353,7 @@ void PlayerEngine::Impl::ScheduleWork() {
                     ? static_cast<std::int64_t>(distance)
                     : -static_cast<std::int64_t>(distance),
                 hotRange,
-                settings_.loopPlayback);
+                hotRangeLoops);
             if (!index || *index == requestedFrame_) {
                 break;
             }

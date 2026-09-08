@@ -468,7 +468,7 @@ void ComparisonPlayer::Impl::UpdateSharedDomain(
     requestedFrame_ = std::min<FrameIndex>(
         requestedFrame_,
         static_cast<FrameIndex>(commonTotalFrames_ - 1U));
-    if (playing_ && !detail::PlaybackRangeContains(
+    if (playing_ && !shuttlePlayback_ && !detail::PlaybackRangeContains(
             effectiveRange_,
             requestedFrame_)) {
         requestedFrame_ = effectiveRange_.startFrame;
@@ -685,6 +685,7 @@ bool ComparisonPlayer::Impl::HasRequestedFrameFailure(
 
 void ComparisonPlayer::Impl::PauseForDecodeFailure(std::string detail) {
     playing_ = false;
+    ResetShuttlePlayback();
     if (pendingPlaybackIntent_) {
         *pendingPlaybackIntent_ = false;
     }
@@ -799,7 +800,8 @@ void ComparisonPlayer::Impl::Tick(const double elapsedSeconds) {
         return;
     }
 
-    playbackFrameAccumulator_ += elapsedSeconds * framesPerSecond_;
+    playbackFrameAccumulator_ += elapsedSeconds * framesPerSecond_ *
+        playbackSpeedScale_;
     const double wholeSteps = std::floor(playbackFrameAccumulator_);
     if (wholeSteps < 1.0) {
         UpdateActualFramesPerSecond(elapsedSeconds);
@@ -811,23 +813,38 @@ void ComparisonPlayer::Impl::Tick(const double elapsedSeconds) {
     const std::int64_t steps = static_cast<std::int64_t>(
         std::min(wholeSteps, maximumSafeSteps));
     const std::int64_t signedSteps = direction_ < 0 ? -steps : steps;
+    const PlaybackRange transportRange = ActiveTransportRange();
+    const bool transportLoop = ActiveTransportLoop();
     const comparison_detail::AdvanceResult advance =
         comparison_detail::AdvanceFrame(
             requestedFrame_,
             signedSteps,
-            effectiveRange_,
-            loopPlayback_);
+            transportRange,
+            transportLoop);
     requestedFrame_ = advance.target;
     if (advance.stoppedAtBoundary) {
+        const bool endedShuttle = shuttlePlayback_;
         playing_ = false;
         playbackFrameAccumulator_ = 0.0;
-        primary_->SetPlaying(false);
-        if (secondary_) {
-            secondary_->SetPlaying(false);
+        ResetShuttlePlayback();
+        if (endedShuttle) {
+            primary_->EndShuttlePlayback();
+            if (secondary_) {
+                secondary_->EndShuttlePlayback();
+            }
+        } else {
+            primary_->SetPlaying(false);
+            if (secondary_) {
+                secondary_->SetPlaying(false);
+            }
         }
         statusUtf8_ = direction_ < 0
-            ? "已到共享播放起始帧"
-            : "已到共享播放结束帧";
+            ? (endedShuttle
+                ? "已到共享素材起始帧"
+                : "已到共享播放起始帧")
+            : (endedShuttle
+                ? "已到共享素材结束帧"
+                : "已到共享播放结束帧");
     }
 
     BroadcastFrameRequest(
@@ -874,6 +891,7 @@ void ComparisonPlayer::Impl::SetPlaying(const bool playing) {
     if (backgroundResourceMode_ && playing) {
         return;
     }
+    ResetShuttlePlayback();
     if (playing) {
         EndScrub();
     }
@@ -924,6 +942,92 @@ void ComparisonPlayer::Impl::SetPlaying(const bool playing) {
         secondary,
         true);
     statusUtf8_ = playing_ ? "正在同步播放" : "已暂停";
+}
+
+void ComparisonPlayer::Impl::BeginShuttlePlayback(
+    const int direction,
+    const double speedScale) {
+    if (shutdown_ || direction == 0 || !std::isfinite(speedScale) ||
+        speedScale <= 0.0) {
+        return;
+    }
+
+    if (!comparisonEnabled_) {
+        if (primaryPlaybackIntentAfterComparisonExit_) {
+            *primaryPlaybackIntentAfterComparisonExit_ = false;
+        }
+        primary_->BeginShuttlePlayback(direction, speedScale);
+        SynchronizeFromSinglePlayer(primary_->Snapshot());
+        return;
+    }
+    if (backgroundResourceMode_) {
+        return;
+    }
+
+    EndScrub();
+    PlayerSnapshot primary = primary_->Snapshot();
+    PlayerSnapshot secondary = secondary_
+        ? secondary_->Snapshot()
+        : PlayerSnapshot{};
+    if (pendingPlaybackIntent_ || HasTrackedPendingOperation() ||
+        primary.loading || secondary.loading) {
+        return;
+    }
+
+    UpdateSharedDomain(primary, secondary);
+    if (!primary.hasSource || commonTotalFrames_ == 0U) {
+        return;
+    }
+
+    shuttlePlayback_ = true;
+    playing_ = true;
+    direction_ = direction < 0 ? -1 : 1;
+    playbackSpeedScale_ = std::clamp(
+        speedScale,
+        detail::kMinimumPlaybackSpeedScale,
+        detail::kMaximumPlaybackSpeedScale);
+    playbackFrameAccumulator_ = 0.0;
+    requestedFrame_ = detail::ClampFrameToPlaybackRange(
+        static_cast<std::int64_t>(requestedFrame_),
+        detail::FullPlaybackRange(commonTotalFrames_));
+    ClearComparisonError();
+
+    primary_->BeginShuttlePlayback(direction_, playbackSpeedScale_);
+    if (secondary_) {
+        secondary_->BeginShuttlePlayback(direction_, playbackSpeedScale_);
+    }
+    BroadcastFrameRequest(
+        FrameRequestKind::PlaybackAdvance,
+        direction_,
+        primary,
+        secondary,
+        true);
+    statusUtf8_ = direction_ < 0
+        ? "方向键同步反向快览"
+        : "方向键同步正向快览";
+}
+
+void ComparisonPlayer::Impl::EndShuttlePlayback() {
+    if (shutdown_) {
+        return;
+    }
+    if (!comparisonEnabled_) {
+        primary_->EndShuttlePlayback();
+        SynchronizeFromSinglePlayer(primary_->Snapshot());
+        return;
+    }
+    if (!shuttlePlayback_) {
+        return;
+    }
+
+    playing_ = false;
+    playbackFrameAccumulator_ = 0.0;
+    ResetShuttlePlayback();
+    primary_->EndShuttlePlayback();
+    if (secondary_) {
+        secondary_->EndShuttlePlayback();
+    }
+    statusUtf8_ = "方向键同步快览已暂停";
 }
 
 void ComparisonPlayer::Impl::StepFrame(const int delta) {
@@ -978,6 +1082,7 @@ void ComparisonPlayer::Impl::BeginScrub() {
     }
 
     MarkUserNavigationDuringPending();
+    ResetShuttlePlayback();
     playing_ = false;
     scrubbing_ = true;
     playbackFrameAccumulator_ = 0.0;
@@ -1168,7 +1273,7 @@ void ComparisonPlayer::Impl::SetPlaybackRange(
         ? secondary_->Snapshot()
         : PlayerSnapshot{};
     UpdateSharedDomain(primary, secondary);
-    if (playing_ && !detail::PlaybackRangeContains(
+    if (playing_ && !shuttlePlayback_ && !detail::PlaybackRangeContains(
             effectiveRange_, requestedFrame_)) {
         requestedFrame_ = effectiveRange_.startFrame;
         BroadcastFrameRequest(
