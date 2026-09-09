@@ -4,7 +4,7 @@
       name="ZT.NativeSequencePlayer"
       processorArchitecture="amd64"
       type="win32"
-      version="0.4.0.0" />
+      version="0.5.0.0" />
   <description>序列播放器</description>
   <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
     <application>
