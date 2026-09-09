@@ -108,7 +108,10 @@ if(ZT_BUILD_TESTS)
 
     add_executable(ZTFrameUploadSmoke
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/FrameUploadSmoke.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/Imaging/PngImageInfo.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/Imaging/WicImageDecoder.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/Overlay/MaskOverlayTexture.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/Platform/Utf8.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/FrameTexture.cpp"
     )
     target_include_directories(ZTFrameUploadSmoke PRIVATE
@@ -132,6 +135,7 @@ if(ZT_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/src/Export/FfmpegProcess.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/Export/Image2SequenceInput.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/Imaging/MediaFoundationVideoDecoder.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/Imaging/PngImageInfo.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/Platform/Utf8.cpp"
     )
     target_include_directories(ZTFfmpegExportSmoke PRIVATE

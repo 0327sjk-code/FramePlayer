@@ -19,6 +19,9 @@ class FrameTexture;
 namespace exporting {
 class FfmpegExportController;
 }
+namespace overlay {
+class MaskOverlayTexture;
+}
 
 enum class OnlineUpdatePhase : std::uint8_t {
     Unavailable,
@@ -42,6 +45,8 @@ struct OnlineUpdateView final {
 struct UiActions {
     std::function<std::optional<std::filesystem::path>()> chooseFolder;
     std::function<std::optional<std::filesystem::path>()> chooseExportFolder;
+    std::function<std::optional<std::filesystem::path>()>
+        chooseMaskOverlayImage;
     std::function<platform::FileLaunchResult(
         const std::filesystem::path&)> openFile;
     std::function<void()> requestClose;
@@ -67,6 +72,7 @@ public:
         ComparisonPlayer& player,
         FrameTexture& primaryFrameTexture,
         FrameTexture& secondaryFrameTexture,
+        overlay::MaskOverlayTexture& maskOverlayTexture,
         exporting::FfmpegExportController& exporter,
         const UiActions& actions);
     [[nodiscard]] bool IsSecondaryViewportAtClientPoint(

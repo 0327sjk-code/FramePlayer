@@ -1,5 +1,6 @@
 #include "Export/ExportPolicy.h"
 
+#include "Overlay/MaskOverlaySpec.h"
 #include "Platform/Utf8.h"
 
 #include <algorithm>
@@ -326,7 +327,10 @@ std::vector<std::wstring> BuildFfmpegArguments(
     const std::uint64_t videoBitRate,
     const PixelCrop& crop,
     const std::uint32_t sourceWidth,
-    const std::uint32_t sourceHeight) {
+    const std::uint32_t sourceHeight,
+    const std::optional<std::filesystem::path>& overlayImagePath) {
+    const bool hasOverlayImage =
+        overlayImagePath.has_value() && !overlayImagePath->empty();
     std::wstring filter;
     if (input.kind == FfmpegInputKind::VideoFile) {
         filter.append(L"trim=end_frame=");
@@ -346,11 +350,18 @@ std::vector<std::wstring> BuildFfmpegArguments(
         filter.append(std::to_wstring(crop.y));
         filter.push_back(L',');
     }
+    filter.append(L"scale=");
+    if (hasOverlayImage) {
+        filter.append(std::to_wstring(overlay::kMaskOverlayWidthPixels));
+        filter.push_back(L':');
+        filter.append(std::to_wstring(overlay::kMaskOverlayHeightPixels));
+        filter.push_back(L':');
+    }
     filter.append(input.kind == FfmpegInputKind::VideoFile
-        ? L"scale=in_range=auto:out_range=tv:out_color_matrix=bt709,"
+        ? L"in_range=auto:out_range=tv:out_color_matrix=bt709,"
           L"format=nv12,setparams=range=limited:color_primaries=bt709:"
           L"color_trc=bt709:colorspace=bt709"
-        : L"scale=in_range=pc:out_range=tv:out_color_matrix=bt709,"
+        : L"in_range=pc:out_range=tv:out_color_matrix=bt709,"
           L"format=nv12,setparams=range=limited:color_primaries=bt709:"
           L"color_trc=bt709:colorspace=bt709");
 
@@ -389,16 +400,47 @@ std::vector<std::wstring> BuildFfmpegArguments(
                 arguments.end(),
                 {L"-ss", ToWideNumber(seekSeconds)});
         }
-        arguments.insert(
-            arguments.end(),
-            {L"-i", input.path.wstring(), L"-map", L"0:v:0"});
+        arguments.insert(arguments.end(), {L"-i", input.path.wstring()});
+        if (!hasOverlayImage) {
+            arguments.insert(arguments.end(), {L"-map", L"0:v:0"});
+        }
     }
 
+    if (hasOverlayImage) {
+        arguments.insert(
+            arguments.end(),
+            {L"-i", overlayImagePath->wstring()});
+    }
+
+    arguments.push_back(L"-an");
+    if (hasOverlayImage) {
+
+        std::wstring complexFilter = L"[0:v]";
+        complexFilter.append(filter);
+        complexFilter.append(
+            L"[base];[1:v]"
+            L"scale=in_range=pc:out_range=tv:out_color_matrix=bt709,"
+            L"format=yuva420p,loop=loop=-1:size=1:start=0,setpts=N/(");
+        complexFilter.append(ToWideNumber(framesPerSecond));
+        complexFilter.append(
+            L"*TB)[overlay];[base][overlay]"
+            L"overlay=0:0:shortest=1:format=yuv420,format=nv12,"
+            L"setparams=range=limited:color_primaries=bt709:"
+            L"color_trc=bt709:colorspace=bt709[outv]");
+        arguments.insert(
+            arguments.end(),
+            {
+                L"-filter_complex", std::move(complexFilter),
+                L"-map", L"[outv]",
+            });
+    } else {
+        arguments.insert(
+            arguments.end(),
+            {L"-vf", std::move(filter)});
+    }
     arguments.insert(
         arguments.end(),
         {
-        L"-an",
-        L"-vf", std::move(filter),
         L"-c:v", L"hevc_nvenc",
         L"-preset", L"p5",
         L"-tune", L"hq",

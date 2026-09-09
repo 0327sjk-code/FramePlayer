@@ -26,12 +26,14 @@ void PlayerUI::Render(
     ComparisonPlayer& player,
     FrameTexture& primaryFrameTexture,
     FrameTexture& secondaryFrameTexture,
+    overlay::MaskOverlayTexture& maskOverlayTexture,
     exporting::FfmpegExportController& exporter,
     const UiActions& actions) {
     impl_->Render(
         player,
         primaryFrameTexture,
         secondaryFrameTexture,
+        maskOverlayTexture,
         exporter,
         actions);
 }

@@ -22,6 +22,7 @@ inline constexpr std::uint32_t kMask864x1080HeightPixels = 1080U;
 inline constexpr float kNormalizedOpeningMinimum = 0.0F;
 inline constexpr float kNormalizedOpeningMaximum = 1.0F;
 inline constexpr float kCenteredOpeningMarginScale = 0.5F;
+inline constexpr std::uint32_t kMaskSourceCodecAlignmentPixels = 16U;
 
 enum class MaskPreset : std::uint8_t {
     None = 0U,
@@ -50,6 +51,9 @@ struct NormalizedMaskOpening final {
     float minimumY = kNormalizedOpeningMinimum;
     float maximumX = kNormalizedOpeningMaximum;
     float maximumY = kNormalizedOpeningMaximum;
+
+    [[nodiscard]] bool operator==(
+        const NormalizedMaskOpening&) const noexcept = default;
 };
 
 struct MaskDisplayRect final {
@@ -148,6 +152,32 @@ struct MaskDisplayRect final {
     return CenteredNormalizedMaskOpening(MaskOpeningPixelSize(preset));
 }
 
+// A source that already matches the preset output size, including a codec's
+// at-most-16-pixel alignment padding, must not be cropped a second time.
+// Square source frames continue to use the original centered 1920 x 1920
+// opening contract.
+[[nodiscard]] inline constexpr NormalizedMaskOpening
+MaskOpeningForPresetAndSource(
+    const MaskPreset preset,
+    const std::uint32_t sourceWidth,
+    const std::uint32_t sourceHeight) noexcept {
+    const MaskPixelSize openingSize = MaskOpeningPixelSize(preset);
+    const std::uint32_t alignedWidth =
+        ((openingSize.width + kMaskSourceCodecAlignmentPixels - 1U) /
+            kMaskSourceCodecAlignmentPixels) *
+        kMaskSourceCodecAlignmentPixels;
+    const std::uint32_t alignedHeight =
+        ((openingSize.height + kMaskSourceCodecAlignmentPixels - 1U) /
+            kMaskSourceCodecAlignmentPixels) *
+        kMaskSourceCodecAlignmentPixels;
+    if (HasMask(preset) &&
+        sourceWidth >= openingSize.width && sourceWidth <= alignedWidth &&
+        sourceHeight >= openingSize.height && sourceHeight <= alignedHeight) {
+        return FullNormalizedMaskOpening();
+    }
+    return MaskOpeningForPreset(preset);
+}
+
 [[nodiscard]] inline constexpr bool IsValidNormalizedMaskOpening(
     const NormalizedMaskOpening opening) noexcept {
     return opening.minimumX >= kNormalizedOpeningMinimum &&
@@ -156,6 +186,11 @@ struct MaskDisplayRect final {
         opening.maximumY <= kNormalizedOpeningMaximum &&
         opening.minimumX <= opening.maximumX &&
         opening.minimumY <= opening.maximumY;
+}
+
+[[nodiscard]] inline constexpr bool IsFullNormalizedMaskOpening(
+    const NormalizedMaskOpening opening) noexcept {
+    return opening == FullNormalizedMaskOpening();
 }
 
 [[nodiscard]] inline constexpr float MapNormalizedCoordinate(
@@ -190,6 +225,20 @@ struct MaskDisplayRect final {
     const MaskPreset preset,
     const MaskDisplayRect displayRect) noexcept {
     return MapMaskOpeningToDisplay(MaskOpeningForPreset(preset), displayRect);
+}
+
+[[nodiscard]] inline constexpr MaskDisplayRect
+MaskOpeningForPresetAndSourceInDisplay(
+    const MaskPreset preset,
+    const std::uint32_t sourceWidth,
+    const std::uint32_t sourceHeight,
+    const MaskDisplayRect displayRect) noexcept {
+    return MapMaskOpeningToDisplay(
+        MaskOpeningForPresetAndSource(
+            preset,
+            sourceWidth,
+            sourceHeight),
+        displayRect);
 }
 
 }  // namespace zt::sequence::ui

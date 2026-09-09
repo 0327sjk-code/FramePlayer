@@ -92,6 +92,8 @@ struct FfmpegInputSpec final {
     std::uint64_t videoBitRate,
     const PixelCrop& crop,
     std::uint32_t sourceWidth,
-    std::uint32_t sourceHeight);
+    std::uint32_t sourceHeight,
+    const std::optional<std::filesystem::path>& overlayImagePath =
+        std::nullopt);
 
 }  // namespace zt::sequence::exporting

@@ -1,6 +1,9 @@
 #include "UI/PlayerUIInternal.h"
 
 #include "Core/ComparisonPlayer.h"
+#include "Overlay/MaskOverlayTexture.h"
+#include "Platform/UserSettings.h"
+#include "Platform/Utf8.h"
 #include "UI/PlayerUILogic.h"
 
 #include "imgui_internal.h"
@@ -9,16 +12,20 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <string>
 
 namespace zt::sequence {
 
 using ui_internal::AnimatedButton;
 using ui_internal::AnimatedButtonStyle;
+using ui_internal::AnimatedCheckbox;
 using ui_internal::DecodeDescription;
+using ui_internal::EllipsizedText;
 using ui_internal::kColorInk;
 using ui_internal::kColorMuted;
 using ui_internal::kColorPrimary;
+using ui_internal::kColorDanger;
 using ui_internal::kColorSurfaceActive;
 using ui_internal::kColorSurfaceHover;
 using ui_internal::kColorSurfaceRaised;
@@ -41,6 +48,8 @@ inline constexpr float kDecodeComboWidth = 168.0F;
 inline constexpr float kConstrainedDecodeComboWidth = 136.0F;
 inline constexpr float kMaskComboWidth = 152.0F;
 inline constexpr float kConstrainedMaskComboWidth = 116.0F;
+inline constexpr float kMaskOverlayPopupMinimumWidth = 304.0F;
+inline constexpr float kMaskOverlayPopupMaximumWidth = 360.0F;
 
 struct CapsuleSliderResult final {
     bool changed = false;
@@ -273,7 +282,9 @@ void PlayerUI::Impl::RenderQuickActions(
 
 void PlayerUI::Impl::RenderResourceSettings(
     ComparisonPlayer& player,
-    const PlayerSnapshot& snapshot) {
+    const PlayerSnapshot& snapshot,
+    overlay::MaskOverlayTexture& maskOverlayTexture,
+    const UiActions& actions) {
     const bool constrained = ImGui::GetContentRegionAvail().x <
         Scale(kResourceSettingsPreferredWidth);
     const float groupSpacing = Scale(constrained ? 8.0F : 12.0F);
@@ -327,7 +338,7 @@ void PlayerUI::Impl::RenderResourceSettings(
     ImGui::SameLine(0.0F, groupSpacing);
     ImGui::TextColored(kColorMuted, "遮罩");
     ImGui::SameLine();
-    RenderMaskPreset(constrained);
+    RenderMaskPreset(constrained, maskOverlayTexture, actions);
     ImGui::SameLine(0.0F, groupSpacing);
     RenderKeyboardShuttleSpeed();
     ImGui::PopStyleVar();
@@ -414,12 +425,24 @@ void PlayerUI::Impl::RenderDecodePercent(
     ImGui::EndCombo();
 }
 
-void PlayerUI::Impl::RenderMaskPreset(const bool constrained) {
-    const std::string_view preview = ui::MaskPresetLabel(maskPreset_);
+void PlayerUI::Impl::RenderMaskPreset(
+    const bool constrained,
+    overlay::MaskOverlayTexture& maskOverlayTexture,
+    const UiActions& actions) {
+    std::string preview(ui::MaskPresetLabel(maskPreset_));
+    if (IsMaskOverlayActive()) {
+        preview.append(" · PNG");
+    }
     ImGui::SetNextItemWidth(Scale(
         constrained ? kConstrainedMaskComboWidth : kMaskComboWidth));
-    if (!ImGui::BeginCombo("##MaskPreset", preview.data())) {
-        TooltipForLastItem("居中遮罩仅影响预览，不修改源文件");
+    ImGui::SetNextWindowSizeConstraints(
+        ImVec2(Scale(kMaskOverlayPopupMinimumWidth), 0.0F),
+        ImVec2(
+            Scale(kMaskOverlayPopupMaximumWidth),
+            std::numeric_limits<float>::max()));
+    if (!ImGui::BeginCombo("##MaskPreset", preview.c_str())) {
+        TooltipForLastItem(
+            "居中遮罩影响预览和导出；PNG 蒙版仅用于 1080 × 1920");
         return;
     }
 
@@ -433,8 +456,136 @@ void PlayerUI::Impl::RenderMaskPreset(const bool constrained) {
             ImGui::SetItemDefaultFocus();
         }
     }
+
+    ImGui::Separator();
+    ImGui::TextColored(kColorMuted, "PNG 蒙版遮罩");
+    bool requestedEnabled = maskOverlayEnabled_;
+    if (AnimatedCheckbox(
+            interactionAnimator_,
+            "添加蒙版遮罩###MaskOverlayEnabled",
+            &requestedEnabled,
+            Scale(28.0F))) {
+        if (!requestedEnabled) {
+            maskOverlayEnabled_ = false;
+        } else if (maskOverlayTextureReady_) {
+            maskOverlayEnabled_ = true;
+            ClearMaskOverlayError();
+        } else {
+            maskOverlayEnabled_ = false;
+            static_cast<void>(ChooseMaskOverlayImage(
+                maskOverlayTexture,
+                actions,
+                true));
+        }
+    }
+    TooltipForLastItem(
+        "启用后将透明 PNG 叠加在预览和 MP4 的最上层");
+
+    if (AnimatedButton(
+            interactionAnimator_,
+            "选择 PNG###ChooseMaskOverlay",
+            ImVec2(Scale(88.0F), Scale(30.0F)),
+            AnimatedButtonStyle::Neutral)) {
+        static_cast<void>(ChooseMaskOverlayImage(
+            maskOverlayTexture,
+            actions,
+            false));
+    }
+    TooltipForLastItem("选择严格为 1080 × 1920 的透明 PNG");
+    ImGui::SameLine(0.0F, Scale(8.0F));
+    const std::string fileName = maskOverlayImagePath_.has_value()
+        ? WideToUtf8(maskOverlayImagePath_->filename().wstring())
+        : "尚未选择";
+    EllipsizedText(
+        fileName.c_str(),
+        ImGui::GetContentRegionAvail().x,
+        maskOverlayImagePath_.has_value() ? kColorInk : kColorMuted);
+    if (maskOverlayImagePath_.has_value()) {
+        const std::string fullPath =
+            WideToUtf8(maskOverlayImagePath_->wstring());
+        TooltipForLastItem(fullPath.c_str());
+    }
+
+    if (!maskOverlayUiError_.empty()) {
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() +
+            ImGui::GetContentRegionAvail().x);
+        ImGui::TextColored(kColorDanger, "%s", maskOverlayUiError_.c_str());
+        ImGui::PopTextWrapPos();
+    } else if (maskOverlayEnabled_ &&
+        maskPreset_ != ui::MaskPreset::Opening1080x1920) {
+        ImGui::TextColored(kColorMuted, "切换到 1080 × 1920 后生效");
+    } else if (maskOverlayTextureReady_) {
+        ImGui::TextColored(
+            kColorMuted,
+            maskOverlayEnabled_ ? "已启用并同步到导出" : "路径已保存");
+    } else {
+        ImGui::TextColored(kColorMuted, "仅支持 1080 × 1920 PNG");
+    }
     ImGui::EndCombo();
-    TooltipForLastItem("居中遮罩仅影响预览，不修改源文件");
+    TooltipForLastItem(
+        "居中遮罩影响预览和导出；PNG 蒙版仅用于 1080 × 1920");
+}
+
+bool PlayerUI::Impl::ChooseMaskOverlayImage(
+    overlay::MaskOverlayTexture& maskOverlayTexture,
+    const UiActions& actions,
+    const bool enableAfterSelection) {
+    if (!actions.chooseMaskOverlayImage) {
+        maskOverlayUiError_ = "当前应用没有提供 PNG 文件选择器";
+        SetLocalError(
+            "无法选择 PNG 蒙版",
+            maskOverlayUiError_,
+            LocalErrorKind::MaskOverlay);
+        return false;
+    }
+
+    const std::optional<std::filesystem::path> selected =
+        actions.chooseMaskOverlayImage();
+    if (!selected.has_value()) {
+        return false;
+    }
+
+    const overlay::MaskOverlayLoadResult loaded =
+        maskOverlayTexture.Load(*selected);
+    if (!loaded) {
+        maskOverlayUiError_ = loaded.errorUtf8.empty()
+            ? "PNG 蒙版加载失败"
+            : loaded.errorUtf8;
+        SetLocalError(
+            "PNG 蒙版未更改",
+            maskOverlayUiError_,
+            LocalErrorKind::MaskOverlay);
+        return false;
+    }
+
+    maskOverlayTextureReady_ = true;
+    maskOverlayImagePath_ = maskOverlayTexture.LoadedPath();
+    if (enableAfterSelection) {
+        maskOverlayEnabled_ = true;
+    }
+    ClearMaskOverlayError();
+    if (!user_settings::SaveMaskOverlayImagePath(*maskOverlayImagePath_)) {
+        maskOverlayUiError_ =
+            "本次可以使用，但 PNG 蒙版路径无法保存到用户设置";
+        SetLocalError(
+            "PNG 蒙版路径未保存",
+            maskOverlayUiError_,
+            LocalErrorKind::MaskOverlay);
+    }
+    return true;
+}
+
+bool PlayerUI::Impl::IsMaskOverlayActive() const noexcept {
+    return maskOverlayEnabled_ && maskOverlayTextureReady_ &&
+        maskOverlayImagePath_.has_value() &&
+        maskPreset_ == ui::MaskPreset::Opening1080x1920;
+}
+
+void PlayerUI::Impl::ClearMaskOverlayError() {
+    maskOverlayUiError_.clear();
+    if (localErrorKind_ == LocalErrorKind::MaskOverlay) {
+        ClearLocalError();
+    }
 }
 
 }  // namespace zt::sequence

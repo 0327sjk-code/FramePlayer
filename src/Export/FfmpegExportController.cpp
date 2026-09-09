@@ -5,6 +5,8 @@
 #include "Export/FfconcatManifest.h"
 #include "Export/FfmpegProcess.h"
 #include "Export/Image2SequenceInput.h"
+#include "Imaging/PngImageInfo.h"
+#include "Overlay/MaskOverlaySpec.h"
 #include "Platform/Utf8.h"
 
 #include <windows.h>
@@ -499,7 +501,7 @@ private:
                 const std::size_t firstFrameIndex =
                     sequence->inclusiveRange.startFrame;
                 std::string dimensionsError;
-                const auto dimensions = ReadPngDimensions(
+                const auto dimensions = ReadPngImageInfo(
                     sequence->orderedPngFrames[firstFrameIndex].path,
                     dimensionsError);
                 if (!dimensions) {
@@ -522,6 +524,45 @@ private:
             if (!pixelCrop) {
                 finishFailed("遮罩裁切范围无效");
                 return;
+            }
+            if (request.overlayImagePath.has_value()) {
+                if (request.overlayImagePath->empty()) {
+                    finishFailed("PNG 蒙版路径为空");
+                    return;
+                }
+                std::string overlayInfoError;
+                const std::optional<PngImageInfo> overlayInfo =
+                    ReadPngImageInfo(
+                        *request.overlayImagePath,
+                        overlayInfoError);
+                if (!overlayInfo) {
+                    finishFailed(std::move(overlayInfoError));
+                    return;
+                }
+                if (!overlay::IsRequiredMaskOverlaySize(
+                        overlayInfo->width,
+                        overlayInfo->height)) {
+                    finishFailed(
+                        "PNG 蒙版尺寸必须严格为 1080 × 1920");
+                    return;
+                }
+                const bool exactOutputSize =
+                    overlay::IsRequiredMaskOverlaySize(
+                        pixelCrop->width,
+                        pixelCrop->height);
+                const bool alignedVideoFrame = video != nullptr &&
+                    IsFullFrameCrop(
+                        *pixelCrop,
+                        sourceWidth,
+                        sourceHeight) &&
+                    overlay::IsCodecAlignedMaskOverlaySize(
+                        sourceWidth,
+                        sourceHeight);
+                if (!exactOutputSize && !alignedVideoFrame) {
+                    finishFailed(
+                        "PNG 蒙版只支持 1080 × 1920 的最终导出画面");
+                    return;
+                }
             }
 
             std::filesystem::path proposedFinalPath;
@@ -607,7 +648,8 @@ private:
                     videoBitRate,
                     *pixelCrop,
                     sourceWidth,
-                    sourceHeight);
+                    sourceHeight,
+                    request.overlayImagePath);
 
                 const FfmpegProcessResult processResult = process_.Run(
                     *ffmpegPath,

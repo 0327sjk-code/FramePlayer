@@ -1,4 +1,5 @@
 #include "Imaging/WicImageDecoder.h"
+#include "Overlay/MaskOverlayTexture.h"
 #include "Render/FrameTexture.h"
 
 #include <d3d11.h>
@@ -6,8 +7,10 @@
 
 #include <cstdint>
 #include <cwchar>
+#include <filesystem>
 #include <iostream>
 #include <limits>
+#include <string_view>
 
 namespace {
 
@@ -22,11 +25,16 @@ void PrintHResult(const wchar_t* operation, const HRESULT result) {
 
 int wmain(const int argumentCount, wchar_t** arguments) {
     if (argumentCount < 2 || argumentCount > 3) {
-        std::wcerr << L"用法：ZTFrameUploadSmoke <PNG路径> [25|50|75|100]\n";
+        std::wcerr
+            << L"用法：ZTFrameUploadSmoke <PNG路径> "
+               L"[25|50|75|100|overlay]\n";
         return 2;
     }
 
-    const std::uint32_t decodePercent = argumentCount == 3
+    const bool testMaskOverlay = argumentCount == 3 &&
+        std::wstring_view(arguments[2]) == L"overlay";
+    const std::uint32_t decodePercent = argumentCount == 3 &&
+        !testMaskOverlay
         ? static_cast<std::uint32_t>(std::wcstoul(arguments[2], nullptr, 10))
         : 100U;
 
@@ -47,6 +55,26 @@ int wmain(const int argumentCount, wchar_t** arguments) {
     if (FAILED(deviceResult)) {
         PrintHResult(L"D3D11CreateDevice", deviceResult);
         return 3;
+    }
+
+    if (testMaskOverlay) {
+        zt::sequence::overlay::MaskOverlayTexture overlayTexture;
+        if (!overlayTexture.Initialize(device.Get(), context.Get())) {
+            std::wcerr << L"MaskOverlayTexture::Initialize failed\n";
+            return 4;
+        }
+        const zt::sequence::overlay::MaskOverlayLoadResult loaded =
+            overlayTexture.Load(std::filesystem::path(arguments[1]));
+        if (!loaded || !overlayTexture.IsLoaded() ||
+            overlayTexture.ShaderResourceView() == nullptr) {
+            std::cerr << (loaded.errorUtf8.empty()
+                ? "MaskOverlayTexture::Load failed"
+                : loaded.errorUtf8) << '\n';
+            return 5;
+        }
+        std::wcout << L"MaskOverlayTexture upload OK: "
+                   << overlayTexture.LoadedPath().c_str() << L'\n';
+        return 0;
     }
 
     zt::sequence::WicImageDecoder decoder;

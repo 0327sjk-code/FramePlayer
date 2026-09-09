@@ -20,6 +20,7 @@ constexpr wchar_t kExportFolderValue[] = L"ExportFolder";
 constexpr wchar_t kLastSequenceFolderValue[] = L"LastSequenceFolder";
 constexpr wchar_t kKeyboardShuttleSpeedPercentValue[] =
     L"KeyboardShuttleSpeedPercent";
+constexpr wchar_t kMaskOverlayImagePathValue[] = L"MaskOverlayImagePath";
 
 class RegistryKey final {
 public:
@@ -231,6 +232,15 @@ bool SaveKeyboardShuttleSpeedPercent(const int percent) noexcept {
     return SaveDwordValue(
         kKeyboardShuttleSpeedPercentValue,
         static_cast<DWORD>(percent));
+}
+
+std::optional<std::filesystem::path> LoadMaskOverlayImagePath() noexcept {
+    return LoadPathValue(kMaskOverlayImagePathValue);
+}
+
+bool SaveMaskOverlayImagePath(
+    const std::filesystem::path& imagePath) noexcept {
+    return SavePathValue(kMaskOverlayImagePathValue, imagePath);
 }
 
 }  // namespace zt::sequence::user_settings

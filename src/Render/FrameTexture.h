@@ -13,6 +13,7 @@ namespace zt::sequence {
 enum class FrameTextureUploadDomain : std::uint8_t {
     PlayerEngine = 0,
     ComparisonPair,
+    MaskOverlay,
 };
 
 struct FrameTextureUploadKey final {

@@ -271,6 +271,7 @@ void PlayerUI::Impl::RenderBottomBar(
     const OnlineUpdateView& onlineUpdateView,
     const UiActions& actions,
     const ErrorView& error,
+    overlay::MaskOverlayTexture& maskOverlayTexture,
     const float height) {
     ImGui::PushStyleColor(ImGuiCol_ChildBg, kColorSurface);
     ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 0.0F);
@@ -318,6 +319,7 @@ void PlayerUI::Impl::RenderBottomBar(
         exportProgress,
         onlineUpdateView,
         actions,
+        maskOverlayTexture,
         compact);
     ImGui::SetCursorPosY(Scale(layout.statusY));
     RenderStatusLine(snapshot, exportProgress, onlineUpdateView, error);
@@ -906,6 +908,7 @@ void PlayerUI::Impl::RenderPlaybackControls(
     const exporting::ExportProgressSnapshot& exportProgress,
     const OnlineUpdateView& onlineUpdateView,
     const UiActions& actions,
+    overlay::MaskOverlayTexture& maskOverlayTexture,
     const bool compact) {
     constexpr float kQuickActionsWidth = 484.0F;
     constexpr float kResourceSettingsWidth = 876.0F;
@@ -937,7 +940,11 @@ void PlayerUI::Impl::RenderPlaybackControls(
         ImGui::SetCursorPosY(
             controlsTop + Scale(ui_detail::kBottomBarControlRowStride * 2.0F));
         centerGroup(kResourceSettingsWidth);
-        RenderResourceSettings(player, snapshot);
+        RenderResourceSettings(
+            player,
+            snapshot,
+            maskOverlayTexture,
+            actions);
 
         ImGui::SetCursorPosY(
             controlsTop + Scale(ui_detail::kBottomBarControlRowStride * 3.0F));
@@ -1024,7 +1031,11 @@ void PlayerUI::Impl::RenderPlaybackControls(
 
         ImGui::TableSetColumnIndex(0);
         centerGroup(kResourceSettingsWidth);
-        RenderResourceSettings(player, snapshot);
+        RenderResourceSettings(
+            player,
+            snapshot,
+            maskOverlayTexture,
+            actions);
 
         ImGui::TableSetColumnIndex(1);
         RenderExportControls(
@@ -1396,6 +1407,9 @@ void PlayerUI::Impl::StartExport(
     request.outputFolder = exportFolder_.value_or(
         DefaultExportFolder(*source));
     request.crop = CurrentExportCrop(player.Snapshot());
+    if (IsMaskOverlayActive()) {
+        request.overlayImagePath = maskOverlayImagePath_;
+    }
     request.source = std::move(*source);
     if (!exporter.Start(std::move(request))) {
         const exporting::ExportProgressSnapshot progress = exporter.Snapshot();
@@ -1411,8 +1425,12 @@ void PlayerUI::Impl::StartExport(
 
 exporting::NormalizedCrop PlayerUI::Impl::CurrentExportCrop(
     const ComparisonPlayerSnapshot& snapshot) const noexcept {
-    const ui::NormalizedMaskOpening opening =
-        ui::MaskOpeningForPreset(maskPreset_);
+    const ui::NormalizedMaskOpening opening = snapshot.enabled
+        ? ui::MaskOpeningForPreset(maskPreset_)
+        : ui::MaskOpeningForPresetAndSource(
+            maskPreset_,
+            snapshot.primary.sourceWidth,
+            snapshot.primary.sourceHeight);
     if (snapshot.enabled) {
         const ui_detail::ComparisonCanvasLayout layout =
             ui_detail::CalculateComparisonCanvasLayout(

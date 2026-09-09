@@ -10,5 +10,6 @@ namespace zt::sequence {
 
 [[nodiscard]] std::optional<std::filesystem::path> ShowFolderPicker(HWND owner);
 [[nodiscard]] std::optional<std::filesystem::path> ShowExportFolderPicker(HWND owner);
+[[nodiscard]] std::optional<std::filesystem::path> ShowPngImagePicker(HWND owner);
 
 }  // namespace zt::sequence

@@ -9,6 +9,7 @@
 #include "Platform/UserSettings.h"
 #include "Platform/Utf8.h"
 #include "Platform/Win32Window.h"
+#include "Overlay/MaskOverlayTexture.h"
 #include "Render/D3D11Renderer.h"
 #include "Render/FrameTexture.h"
 #include "UI/PlayerUI.h"
@@ -344,10 +345,14 @@ int Application::Run(
     static_cast<void>(updateController->Initialize());
     auto primaryFrameTexture = std::make_unique<FrameTexture>();
     auto secondaryFrameTexture = std::make_unique<FrameTexture>();
+    auto maskOverlayTexture =
+        std::make_unique<overlay::MaskOverlayTexture>();
     auto playerUi = std::make_unique<PlayerUI>();
     if (!primaryFrameTexture->Initialize(renderer.Device(), renderer.Context()) ||
-        !secondaryFrameTexture->Initialize(renderer.Device(), renderer.Context())) {
+        !secondaryFrameTexture->Initialize(renderer.Device(), renderer.Context()) ||
+        !maskOverlayTexture->Initialize(renderer.Device(), renderer.Context())) {
         playerUi.reset();
+        maskOverlayTexture.reset();
         secondaryFrameTexture.reset();
         primaryFrameTexture.reset();
         updateController->Shutdown();
@@ -374,6 +379,7 @@ int Application::Run(
     const UiActions uiActions{
         [&window]() { return ShowFolderPicker(window.Handle()); },
         [&window]() { return ShowExportFolderPicker(window.Handle()); },
+        [&window]() { return ShowPngImagePicker(window.Handle()); },
         [](const std::filesystem::path& filePath) {
             return platform::OpenFileWithDefaultApplication(filePath);
         },
@@ -506,6 +512,7 @@ int Application::Run(
             *player,
             *primaryFrameTexture,
             *secondaryFrameTexture,
+            *maskOverlayTexture,
             *exporter,
             uiActions);
         ImGui::Render();
@@ -588,6 +595,8 @@ int Application::Run(
     exporter->Shutdown();
     playerUi.reset();
     exporter.reset();
+    maskOverlayTexture->Reset();
+    maskOverlayTexture.reset();
     secondaryFrameTexture->Reset();
     secondaryFrameTexture.reset();
     primaryFrameTexture->Reset();

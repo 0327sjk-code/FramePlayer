@@ -23,4 +23,10 @@ LoadKeyboardShuttleSpeedPercent() noexcept;
 
 [[nodiscard]] bool SaveKeyboardShuttleSpeedPercent(int percent) noexcept;
 
+[[nodiscard]] std::optional<std::filesystem::path>
+LoadMaskOverlayImagePath() noexcept;
+
+[[nodiscard]] bool SaveMaskOverlayImagePath(
+    const std::filesystem::path& imagePath) noexcept;
+
 }  // namespace zt::sequence::user_settings

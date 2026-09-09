@@ -1,4 +1,5 @@
 #include "Render/FrameTexture.h"
+#include "Overlay/MaskOverlaySpec.h"
 #include "UI/ComparisonCanvasLayout.h"
 #include "UI/MaskPreset.h"
 #include "UI/PlayerUILogic.h"
@@ -57,6 +58,11 @@ inline constexpr zt::sequence::FrameTextureUploadKey kComparisonTextureKey{
     7U,
     12U,
     3U};
+inline constexpr zt::sequence::FrameTextureUploadKey kMaskOverlayTextureKey{
+    zt::sequence::FrameTextureUploadDomain::MaskOverlay,
+    7U,
+    12U,
+    3U};
 inline constexpr zt::sequence::FrameTextureUploadKey kOtherGenerationKey{
     zt::sequence::FrameTextureUploadDomain::PlayerEngine,
     8U,
@@ -68,6 +74,7 @@ inline constexpr zt::sequence::FrameTextureUploadKey kOtherFrameKey{
     13U,
     3U};
 static_assert(kPlayerTextureKey != kComparisonTextureKey);
+static_assert(kPlayerTextureKey != kMaskOverlayTextureKey);
 static_assert(kPlayerTextureKey != kOtherGenerationKey);
 static_assert(kPlayerTextureKey != kOtherFrameKey);
 static_assert(ClientPointInsideRect(728, 44, 728.0F, 44.0F, 1448.0F, 739.0F));
@@ -83,6 +90,7 @@ using zt::sequence::ui::IsValidNormalizedMaskOpening;
 using zt::sequence::ui::MapMaskOpeningToDisplay;
 using zt::sequence::ui::MaskDisplayRect;
 using zt::sequence::ui::MaskOpeningForPreset;
+using zt::sequence::ui::MaskOpeningForPresetAndSource;
 using zt::sequence::ui::MaskOpeningForPresetInDisplay;
 using zt::sequence::ui::MaskPixelSize;
 using zt::sequence::ui::MaskPreset;
@@ -700,6 +708,37 @@ static_assert(RectEquals(
     0.0F,
     0.78125F,
     1.0F));
+static_assert(RectEquals(
+    MaskOpeningForPresetAndSource(
+        MaskPreset::Opening1080x1920,
+        1080U,
+        1920U),
+    0.0F,
+    0.0F,
+    1.0F,
+    1.0F));
+static_assert(RectEquals(
+    MaskOpeningForPresetAndSource(
+        MaskPreset::Opening1080x1920,
+        1088U,
+        1920U),
+    0.0F,
+    0.0F,
+    1.0F,
+    1.0F));
+static_assert(RectEquals(
+    MaskOpeningForPresetAndSource(
+        MaskPreset::Opening1080x1920,
+        1920U,
+        1920U),
+    0.21875F,
+    0.0F,
+    0.78125F,
+    1.0F));
+static_assert(zt::sequence::overlay::IsRequiredMaskOverlaySize(1080U, 1920U));
+static_assert(!zt::sequence::overlay::IsRequiredMaskOverlaySize(1920U, 1080U));
+static_assert(zt::sequence::overlay::IsCodecAlignedMaskOverlaySize(1088U, 1920U));
+static_assert(!zt::sequence::overlay::IsCodecAlignedMaskOverlaySize(1104U, 1920U));
 static_assert(RectEquals(
     MaskOpeningForPreset(MaskPreset::Opening864x1080),
     0.275F,

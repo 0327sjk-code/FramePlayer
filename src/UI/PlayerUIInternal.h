@@ -30,6 +30,9 @@ enum class FrameTextureUploadDomain : std::uint8_t;
 namespace exporting {
 class FfmpegExportController;
 }
+namespace overlay {
+class MaskOverlayTexture;
+}
 
 namespace ui_internal {
 
@@ -114,6 +117,7 @@ public:
         ComparisonPlayer& player,
         FrameTexture& primaryFrameTexture,
         FrameTexture& secondaryFrameTexture,
+        overlay::MaskOverlayTexture& maskOverlayTexture,
         exporting::FfmpegExportController& exporter,
         const UiActions& actions);
     [[nodiscard]] bool IsSecondaryViewportAtClientPoint(
@@ -150,6 +154,7 @@ private:
         FrameUpload,
         Renderer,
         ExternalFile,
+        MaskOverlay,
     };
 
     struct ErrorView final {
@@ -165,6 +170,8 @@ private:
         float physicalWidth,
         bool showSequenceFrameOffset) const noexcept;
     void SynchronizeControls(const ComparisonPlayerSnapshot& snapshot);
+    void SynchronizeMaskOverlaySettings(
+        overlay::MaskOverlayTexture& maskOverlayTexture);
     void SynchronizeExportResult(
         const exporting::ExportProgressSnapshot& exportProgress);
     void UploadDisplayFrame(
@@ -184,17 +191,23 @@ private:
         const UiActions& actions);
     void RenderResourceSettings(
         ComparisonPlayer& player,
-        const PlayerSnapshot& snapshot);
+        const PlayerSnapshot& snapshot,
+        overlay::MaskOverlayTexture& maskOverlayTexture,
+        const UiActions& actions);
     void RenderDecodePercent(
         ComparisonPlayer& player,
         const PlayerSnapshot& snapshot,
         bool constrained);
-    void RenderMaskPreset(bool constrained);
+    void RenderMaskPreset(
+        bool constrained,
+        overlay::MaskOverlayTexture& maskOverlayTexture,
+        const UiActions& actions);
     void RenderViewport(
         ComparisonPlayer& player,
         const ComparisonPlayerSnapshot& snapshot,
         FrameTexture& primaryFrameTexture,
         FrameTexture& secondaryFrameTexture,
+        const overlay::MaskOverlayTexture& maskOverlayTexture,
         float height);
     void RenderEmptyOrLoading(
         const PlayerSnapshot& snapshot,
@@ -210,7 +223,8 @@ private:
         bool comparisonLayout,
         std::size_t transportTotalFrames,
         bool frameAvailable,
-        FrameTextureUploadDomain uploadDomain);
+        FrameTextureUploadDomain uploadDomain,
+        const overlay::MaskOverlayTexture& maskOverlayTexture);
     void HandleViewportScrub(
         ComparisonPlayer& player,
         const PlayerSnapshot& snapshot,
@@ -228,6 +242,11 @@ private:
     void RenderMaskOverlay(
         ImVec2 imageMin,
         ImVec2 imageMax,
+        ui::NormalizedMaskOpening opening,
+        ImDrawList* drawList) const;
+    void RenderPngMaskOverlay(
+        ui::MaskDisplayRect openingDisplay,
+        const overlay::MaskOverlayTexture& maskOverlayTexture,
         ImDrawList* drawList) const;
     void RenderViewportBadges(
         const PlayerSnapshot& snapshot,
@@ -247,6 +266,7 @@ private:
         const OnlineUpdateView& onlineUpdateView,
         const UiActions& actions,
         const ErrorView& error,
+        overlay::MaskOverlayTexture& maskOverlayTexture,
         float height);
     void RenderTimeline(
         ComparisonPlayer& player,
@@ -265,6 +285,7 @@ private:
         const exporting::ExportProgressSnapshot& exportProgress,
         const OnlineUpdateView& onlineUpdateView,
         const UiActions& actions,
+        overlay::MaskOverlayTexture& maskOverlayTexture,
         bool compact);
     void RenderTransportControls(
         ComparisonPlayer& player,
@@ -291,6 +312,12 @@ private:
         const ErrorView& error);
     void ChooseExportFolder(const UiActions& actions);
     void OpenLastExportedVideo(const UiActions& actions);
+    [[nodiscard]] bool ChooseMaskOverlayImage(
+        overlay::MaskOverlayTexture& maskOverlayTexture,
+        const UiActions& actions,
+        bool enableAfterSelection);
+    [[nodiscard]] bool IsMaskOverlayActive() const noexcept;
+    void ClearMaskOverlayError();
     [[nodiscard]] bool IsLastExportedVideoAvailable() const;
     void StartExport(
         ComparisonPlayer& player,
@@ -331,6 +358,11 @@ private:
     bool decodeChangePending_ = false;
     bool decodeChangeFailed_ = false;
     ui::MaskPreset maskPreset_ = ui::MaskPreset::None;
+    bool maskOverlaySettingsLoaded_ = false;
+    bool maskOverlayEnabled_ = false;
+    bool maskOverlayTextureReady_ = false;
+    std::optional<std::filesystem::path> maskOverlayImagePath_;
+    std::string maskOverlayUiError_;
     float framesPerSecond_ = 60.0F;
     Generation observedGeneration_ = std::numeric_limits<Generation>::max();
     bool exportSettingsLoaded_ = false;

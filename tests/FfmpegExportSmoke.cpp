@@ -113,11 +113,12 @@ void PrintProgress(const ExportProgressSnapshot& progress) {
 }  // namespace
 
 int wmain(const int argumentCount, wchar_t** arguments) {
-    if (argumentCount < 3 || argumentCount > 8) {
+    if (argumentCount < 3 || argumentCount > 9) {
         std::cerr
             << "usage: ZTFfmpegExportSmoke <source-path> <output-folder> "
                "[none|1080x1080|1920x1080|1080x1920|864x1080] "
-               "[start-index] [end-index] [fps] [cancel-after-ms]\n";
+               "[start-index] [end-index] [fps] [cancel-after-ms|-] "
+               "[overlay-png]\n";
         return 2;
     }
 
@@ -176,11 +177,15 @@ int wmain(const int argumentCount, wchar_t** arguments) {
     const auto framesPerSecond = argumentCount >= 7
         ? ParseFramesPerSecond(arguments[6])
         : std::optional<double>(defaultFramesPerSecond);
-    const auto cancelAfterMilliseconds = argumentCount >= 8
+    const bool cancelPlaceholder = argumentCount >= 8 &&
+        std::wstring_view(arguments[7]) == L"-";
+    const auto cancelAfterMilliseconds = argumentCount >= 8 &&
+        !cancelPlaceholder
         ? ParseIndex(arguments[7])
         : std::optional<std::size_t>{};
     if (!start || !end || !framesPerSecond ||
-        (argumentCount >= 8 && !cancelAfterMilliseconds) ||
+        (argumentCount >= 8 && !cancelPlaceholder &&
+            !cancelAfterMilliseconds) ||
         *start > *end ||
         *end >= sourceFrameCount) {
         std::cerr << "invalid export range or fps\n";
@@ -225,6 +230,10 @@ int wmain(const int argumentCount, wchar_t** arguments) {
     }
     request.crop = *crop;
     request.outputFolder = outputFolder;
+    if (argumentCount >= 9) {
+        request.overlayImagePath =
+            std::filesystem::path(arguments[8]).lexically_normal();
+    }
 
     zt::sequence::exporting::FfmpegExportController controller;
     if (!controller.Start(std::move(request))) {

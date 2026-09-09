@@ -80,6 +80,19 @@ using zt::sequence::exporting::PixelCrop;
     return std::nullopt;
 }
 
+[[nodiscard]] std::size_t CountArgumentPairs(
+    const std::vector<std::wstring>& arguments,
+    const std::wstring_view option,
+    const std::wstring_view value) {
+    std::size_t count = 0U;
+    for (std::size_t index = 0U; index + 1U < arguments.size(); ++index) {
+        if (arguments[index] == option && arguments[index + 1U] == value) {
+            ++count;
+        }
+    }
+    return count;
+}
+
 [[nodiscard]] bool TestCrop(
     const NormalizedCrop& normalized,
     const PixelCrop& expected,
@@ -366,6 +379,45 @@ int main() {
             !ArgumentValue(videoArguments, L"-temporal_aq").has_value() &&
             !ArgumentValue(videoArguments, L"-multipass").has_value(),
         "video input keeps the measured fast high-quality NVENC path");
+
+    const std::filesystem::path overlayPath =
+        L"D:\\蒙版\\portrait-overlay.png";
+    const std::vector<std::wstring> overlayArguments = BuildFfmpegArguments(
+        image2Input,
+        L"D:\\导出\\蒙版.part.mp4",
+        3U,
+        60.0,
+        13'920'000ULL,
+        {420U, 0U, 1080U, 1920U},
+        1920U,
+        1920U,
+        overlayPath);
+    const auto complexFilter =
+        ArgumentValue(overlayArguments, L"-filter_complex");
+    passed &= Expect(
+        !ArgumentValue(overlayArguments, L"-vf").has_value() &&
+            complexFilter.has_value() &&
+            *complexFilter ==
+                L"[0:v]crop=1080:1920:420:0,"
+                L"scale=1080:1920:in_range=pc:out_range=tv:"
+                L"out_color_matrix=bt709,"
+                L"format=nv12,setparams=range=limited:"
+                L"color_primaries=bt709:color_trc=bt709:"
+                L"colorspace=bt709[base];[1:v]"
+                L"scale=in_range=pc:out_range=tv:out_color_matrix=bt709,"
+                L"format=yuva420p,loop=loop=-1:size=1:start=0,"
+                L"setpts=N/(60*TB)[overlay];[base][overlay]"
+                L"overlay=0:0:shortest=1:format=yuv420,format=nv12,"
+                L"setparams=range=limited:color_primaries=bt709:"
+                L"color_trc=bt709:colorspace=bt709[outv]",
+        "PNG overlay uses one looped alpha frame after the unchanged base color path");
+    passed &= Expect(
+        CountArgumentPairs(overlayArguments, L"-i", image2Input.path.wstring()) ==
+                1U &&
+            CountArgumentPairs(overlayArguments, L"-i", overlayPath.wstring()) ==
+                1U &&
+            ArgumentValue(overlayArguments, L"-map") == L"[outv]",
+        "PNG overlay is a second input and explicitly maps the composited output");
 
     return passed ? 0 : 1;
 }

@@ -2,6 +2,7 @@
 
 #include "Core/ComparisonPlayer.h"
 #include "Export/FfmpegExportController.h"
+#include "Overlay/MaskOverlayTexture.h"
 #include "Platform/UserSettings.h"
 #include "Render/FrameTexture.h"
 #include "UI/PlayerUILogic.h"
@@ -33,6 +34,7 @@ void PlayerUI::Impl::Render(
     ComparisonPlayer& player,
     FrameTexture& primaryFrameTexture,
     FrameTexture& secondaryFrameTexture,
+    overlay::MaskOverlayTexture& maskOverlayTexture,
     exporting::FfmpegExportController& exporter,
     const UiActions& actions) {
     interactionAnimator_.BeginFrame(ImGui::GetIO().DeltaTime);
@@ -60,6 +62,7 @@ void PlayerUI::Impl::Render(
         snapshot.errorUtf8 = comparisonSnapshot.errorUtf8;
     }
     SynchronizeControls(comparisonSnapshot);
+    SynchronizeMaskOverlaySettings(maskOverlayTexture);
 
     PlayerSnapshot primaryViewportSnapshot = comparisonSnapshot.primary;
     PlayerSnapshot secondaryViewportSnapshot = comparisonSnapshot.secondary;
@@ -158,6 +161,7 @@ void PlayerUI::Impl::Render(
             comparisonSnapshot,
             primaryFrameTexture,
             secondaryFrameTexture,
+            maskOverlayTexture,
             viewportHeight);
         ImGui::SetCursorPos(ImVec2(0.0F, topBarHeight + viewportHeight));
         RenderBottomBar(
@@ -169,6 +173,7 @@ void PlayerUI::Impl::Render(
             onlineUpdateView,
             actions,
             error,
+            maskOverlayTexture,
             bottomHeight);
         HandleKeyboard(player, snapshot, comparisonSnapshot);
     }
@@ -348,6 +353,31 @@ void PlayerUI::Impl::SynchronizeControls(
     if (!snapshot.hasSource &&
         PaneState(ViewportPane::Primary).textureWasVisible) {
         PaneState(ViewportPane::Primary).textureWasVisible = false;
+    }
+}
+
+void PlayerUI::Impl::SynchronizeMaskOverlaySettings(
+    overlay::MaskOverlayTexture& maskOverlayTexture) {
+    if (maskOverlaySettingsLoaded_) {
+        return;
+    }
+
+    maskOverlaySettingsLoaded_ = true;
+    maskOverlayImagePath_ = user_settings::LoadMaskOverlayImagePath();
+    if (!maskOverlayImagePath_.has_value()) {
+        return;
+    }
+
+    const overlay::MaskOverlayLoadResult loaded =
+        maskOverlayTexture.Load(*maskOverlayImagePath_);
+    maskOverlayTextureReady_ = static_cast<bool>(loaded);
+    if (loaded) {
+        maskOverlayImagePath_ = maskOverlayTexture.LoadedPath();
+        maskOverlayUiError_.clear();
+    } else {
+        maskOverlayUiError_ = loaded.errorUtf8.empty()
+            ? "已保存的 PNG 蒙版无法加载"
+            : loaded.errorUtf8;
     }
 }
 

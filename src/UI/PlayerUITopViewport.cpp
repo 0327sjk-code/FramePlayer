@@ -1,6 +1,7 @@
 #include "UI/PlayerUIInternal.h"
 
 #include "Core/ComparisonPlayer.h"
+#include "Overlay/MaskOverlayTexture.h"
 #include "Render/FrameTexture.h"
 #include "UI/ComparisonCanvasLayout.h"
 #include "UI/PlayerUILogic.h"
@@ -116,6 +117,7 @@ void PlayerUI::Impl::RenderViewport(
     const ComparisonPlayerSnapshot& comparisonSnapshot,
     FrameTexture& primaryFrameTexture,
     FrameTexture& secondaryFrameTexture,
+    const overlay::MaskOverlayTexture& maskOverlayTexture,
     const float height) {
     ImGui::PushStyleColor(ImGuiCol_ChildBg, kColorViewportBackground);
     ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 0.0F);
@@ -169,7 +171,8 @@ void PlayerUI::Impl::RenderViewport(
                 false,
                 primarySnapshot.totalFrames,
                 true,
-                FrameTextureUploadDomain::PlayerEngine);
+                FrameTextureUploadDomain::PlayerEngine,
+                maskOverlayTexture);
         }
     } else {
         const float dividerWidth = Scale(2.0F);
@@ -199,7 +202,8 @@ void PlayerUI::Impl::RenderViewport(
                     comparisonSnapshot.primaryFrameAvailable,
                 comparisonSnapshot.active
                     ? FrameTextureUploadDomain::ComparisonPair
-                    : FrameTextureUploadDomain::PlayerEngine);
+                    : FrameTextureUploadDomain::PlayerEngine,
+                maskOverlayTexture);
         }
 
         ImGui::SameLine(0.0F, dividerWidth);
@@ -224,7 +228,8 @@ void PlayerUI::Impl::RenderViewport(
                     comparisonSnapshot.secondaryFrameAvailable,
                 comparisonSnapshot.active
                     ? FrameTextureUploadDomain::ComparisonPair
-                    : FrameTextureUploadDomain::PlayerEngine);
+                    : FrameTextureUploadDomain::PlayerEngine,
+                maskOverlayTexture);
         }
 
         if (primaryViewportRect_.valid && secondaryViewportRect_.valid) {
@@ -360,7 +365,8 @@ void PlayerUI::Impl::RenderSequenceViewport(
     const bool comparisonLayout,
     const std::size_t transportTotalFrames,
     const bool frameAvailable,
-    const FrameTextureUploadDomain uploadDomain) {
+    const FrameTextureUploadDomain uploadDomain,
+    const overlay::MaskOverlayTexture& maskOverlayTexture) {
     ViewportPaneState& paneState = PaneState(pane);
     const ImVec2 interactionSize{
         std::max(1.0F, available.x),
@@ -416,12 +422,18 @@ void PlayerUI::Impl::RenderSequenceViewport(
             snapshot.displayFrame->sourceHeight > 0U
         ? snapshot.displayFrame->sourceHeight
         : snapshot.sourceHeight;
+    const ui::NormalizedMaskOpening requestedOpening = comparisonLayout
+        ? ui::MaskOpeningForPreset(maskPreset_)
+        : ui::MaskOpeningForPresetAndSource(
+            maskPreset_,
+            originalSourceWidth,
+            originalSourceHeight);
     const ui_detail::ComparisonCanvasLayout comparisonCanvasLayout =
         comparisonLayout
         ? ui_detail::CalculateComparisonCanvasLayout(
             originalSourceWidth,
             originalSourceHeight,
-            ui::MaskOpeningForPreset(maskPreset_))
+            requestedOpening)
         : ui_detail::ComparisonCanvasLayout{};
     const bool hasVisibleLayout = !comparisonLayout ||
         comparisonCanvasLayout.hasVisibleContent;
@@ -484,7 +496,8 @@ void PlayerUI::Impl::RenderSequenceViewport(
             imageRect.minimumY,
             imageRect.maximumX,
             imageRect.maximumY};
-        ui::MaskDisplayRect openingDisplay = canvasDisplay;
+        ui::MaskDisplayRect openingDisplay =
+            ui::MapMaskOpeningToDisplay(requestedOpening, canvasDisplay);
         if (comparisonLayout) {
             drawList->AddRectFilled(
                 ImVec2(canvasDisplay.minimumX, canvasDisplay.minimumY),
@@ -520,8 +533,16 @@ void PlayerUI::Impl::RenderSequenceViewport(
             drawList->PopClipRect();
         }
         if (!comparisonLayout) {
-            RenderMaskOverlay(imageMin, imageMax, drawList);
+            RenderMaskOverlay(
+                imageMin,
+                imageMax,
+                requestedOpening,
+                drawList);
         }
+        RenderPngMaskOverlay(
+            openingDisplay,
+            maskOverlayTexture,
+            drawList);
     } else if (!frameOutsideSource) {
         const char* preparing = snapshot.buffering
             ? "正在同步缓冲…"
@@ -621,8 +642,10 @@ void PlayerUI::Impl::HandleViewportNavigation(
 void PlayerUI::Impl::RenderMaskOverlay(
     const ImVec2 imageMin,
     const ImVec2 imageMax,
+    const ui::NormalizedMaskOpening normalizedOpening,
     ImDrawList* drawList) const {
-    if (drawList == nullptr || !ui::HasMask(maskPreset_)) {
+    if (drawList == nullptr || !ui::HasMask(maskPreset_) ||
+        ui::IsFullNormalizedMaskOpening(normalizedOpening)) {
         return;
     }
 
@@ -632,7 +655,7 @@ void PlayerUI::Impl::RenderMaskOverlay(
         imageMax.x,
         imageMax.y};
     const ui::MaskDisplayRect opening =
-        ui::MaskOpeningForPresetInDisplay(maskPreset_, imageRect);
+        ui::MapMaskOpeningToDisplay(normalizedOpening, imageRect);
     const ImU32 maskColor = ImGui::GetColorU32(kColorMask);
 
     drawList->AddRectFilled(
@@ -671,6 +694,24 @@ void PlayerUI::Impl::RenderMaskOverlay(
         0.0F,
         0,
         Scale(1.0F));
+}
+
+void PlayerUI::Impl::RenderPngMaskOverlay(
+    const ui::MaskDisplayRect openingDisplay,
+    const overlay::MaskOverlayTexture& maskOverlayTexture,
+    ImDrawList* drawList) const {
+    if (drawList == nullptr || !IsMaskOverlayActive() ||
+        !maskOverlayTexture.IsLoaded() ||
+        openingDisplay.maximumX <= openingDisplay.minimumX ||
+        openingDisplay.maximumY <= openingDisplay.minimumY) {
+        return;
+    }
+
+    drawList->AddImage(
+        ImTextureRef(reinterpret_cast<void*>(
+            maskOverlayTexture.ShaderResourceView())),
+        ImVec2(openingDisplay.minimumX, openingDisplay.minimumY),
+        ImVec2(openingDisplay.maximumX, openingDisplay.maximumY));
 }
 
 void PlayerUI::Impl::HandleViewportScrub(
@@ -824,6 +865,9 @@ void PlayerUI::Impl::RenderViewportBadges(
     if (ui::HasMask(maskPreset_)) {
         drawRightBadge(
             "遮罩 · " + std::string(ui::MaskPresetLabel(maskPreset_)));
+    }
+    if (IsMaskOverlayActive()) {
+        drawRightBadge("PNG 蒙版");
     }
 }
 

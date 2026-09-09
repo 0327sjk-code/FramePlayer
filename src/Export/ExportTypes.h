@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 
 namespace zt::sequence::exporting {
@@ -22,6 +23,7 @@ struct FfmpegExportRequest final {
     ExportSourceSnapshot source;
     NormalizedCrop crop;
     std::filesystem::path outputFolder;
+    std::optional<std::filesystem::path> overlayImagePath;
 };
 
 enum class ExportState : std::uint8_t {
