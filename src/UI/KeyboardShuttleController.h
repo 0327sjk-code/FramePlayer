@@ -6,8 +6,33 @@
 namespace zt::sequence::ui_detail {
 
 inline constexpr double kKeyboardShuttleActivationSeconds = 0.25;
-inline constexpr double kKeyboardShuttlePlaybackRate = 0.80;
 inline constexpr double kMaximumKeyboardShuttleInputStepSeconds = 0.10;
+inline constexpr int kDefaultKeyboardShuttleSpeedPercent = 80;
+inline constexpr int kMinimumKeyboardShuttleSpeedPercent = 10;
+inline constexpr int kMaximumKeyboardShuttleSpeedPercent = 100;
+inline constexpr int kKeyboardShuttleSpeedPercentStep = 5;
+
+[[nodiscard]] inline constexpr int ClampKeyboardShuttleSpeedPercent(
+    const int percent) noexcept {
+    const int bounded = std::clamp(
+        percent,
+        kMinimumKeyboardShuttleSpeedPercent,
+        kMaximumKeyboardShuttleSpeedPercent);
+    const int offset = bounded - kMinimumKeyboardShuttleSpeedPercent;
+    const int lower = kMinimumKeyboardShuttleSpeedPercent +
+        (offset / kKeyboardShuttleSpeedPercentStep) *
+            kKeyboardShuttleSpeedPercentStep;
+    const int upper = std::min(
+        kMaximumKeyboardShuttleSpeedPercent,
+        lower + kKeyboardShuttleSpeedPercentStep);
+    return bounded - lower < upper - bounded ? lower : upper;
+}
+
+[[nodiscard]] inline constexpr double
+KeyboardShuttlePlaybackRateFromPercent(const int percent) noexcept {
+    return static_cast<double>(ClampKeyboardShuttleSpeedPercent(percent)) /
+        100.0;
+}
 
 struct KeyboardShuttleInput final {
     bool navigationAllowed = false;

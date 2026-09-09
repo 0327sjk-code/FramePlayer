@@ -187,8 +187,9 @@ private:
         const PlayerSnapshot& snapshot);
     void RenderDecodePercent(
         ComparisonPlayer& player,
-        const PlayerSnapshot& snapshot);
-    void RenderMaskPreset();
+        const PlayerSnapshot& snapshot,
+        bool constrained);
+    void RenderMaskPreset(bool constrained);
     void RenderViewport(
         ComparisonPlayer& player,
         const ComparisonPlayerSnapshot& snapshot,
@@ -272,6 +273,7 @@ private:
         ComparisonPlayer& player,
         const PlayerSnapshot& snapshot,
         bool exportBusy);
+    void RenderKeyboardShuttleSpeed();
     void RenderExportControls(
         ComparisonPlayer& player,
         const PlayerSnapshot& snapshot,
@@ -318,6 +320,10 @@ private:
     bool keyboardComparisonEnabled_ = false;
     Generation keyboardPrimaryGeneration_ = 0U;
     Generation keyboardSecondaryGeneration_ = 0U;
+    int keyboardShuttleSpeedPercent_ =
+        ui_detail::kDefaultKeyboardShuttleSpeedPercent;
+    bool keyboardShuttleSpeedSettingsLoaded_ = false;
+    bool keyboardShuttleSpeedPersistPending_ = false;
     int memoryGiB_ = 25;
     std::uint32_t decodePercent_ = 100U;
     std::uint32_t requestedDecodePercent_ = 100U;

@@ -18,6 +18,8 @@ namespace {
 constexpr wchar_t kRegistrySubKey[] = L"Software\\ZTSequencePlayer";
 constexpr wchar_t kExportFolderValue[] = L"ExportFolder";
 constexpr wchar_t kLastSequenceFolderValue[] = L"LastSequenceFolder";
+constexpr wchar_t kKeyboardShuttleSpeedPercentValue[] =
+    L"KeyboardShuttleSpeedPercent";
 
 class RegistryKey final {
 public:
@@ -43,6 +45,20 @@ public:
 private:
     HKEY value_ = nullptr;
 };
+
+[[nodiscard]] bool CreateWritableSettingsKey(RegistryKey& key) noexcept {
+    const LSTATUS createStatus = ::RegCreateKeyExW(
+        HKEY_CURRENT_USER,
+        kRegistrySubKey,
+        0U,
+        nullptr,
+        REG_OPTION_NON_VOLATILE,
+        KEY_SET_VALUE,
+        nullptr,
+        key.Address(),
+        nullptr);
+    return createStatus == ERROR_SUCCESS && key.Get() != nullptr;
+}
 
 [[nodiscard]] std::optional<std::filesystem::path> LoadPathValue(
     const wchar_t* const valueName) noexcept {
@@ -114,18 +130,7 @@ private:
         }
 
         RegistryKey key;
-        DWORD disposition = 0U;
-        const LSTATUS createStatus = ::RegCreateKeyExW(
-            HKEY_CURRENT_USER,
-            kRegistrySubKey,
-            0U,
-            nullptr,
-            REG_OPTION_NON_VOLATILE,
-            KEY_SET_VALUE,
-            nullptr,
-            key.Address(),
-            &disposition);
-        if (createStatus != ERROR_SUCCESS || key.Get() == nullptr) {
+        if (!CreateWritableSettingsKey(key)) {
             return false;
         }
 
@@ -140,6 +145,54 @@ private:
     } catch (...) {
         return false;
     }
+}
+
+[[nodiscard]] std::optional<DWORD> LoadDwordValue(
+    const wchar_t* const valueName) noexcept {
+    if (valueName == nullptr || *valueName == L'\0') {
+        return std::nullopt;
+    }
+
+    DWORD value = 0U;
+    DWORD valueType = 0U;
+    DWORD byteCount = static_cast<DWORD>(sizeof(value));
+    const DWORD flags = RRF_RT_REG_DWORD | RRF_ZEROONFAILURE;
+    const LSTATUS readStatus = ::RegGetValueW(
+        HKEY_CURRENT_USER,
+        kRegistrySubKey,
+        valueName,
+        flags,
+        &valueType,
+        &value,
+        &byteCount);
+    if (readStatus != ERROR_SUCCESS || valueType != REG_DWORD ||
+        byteCount != static_cast<DWORD>(sizeof(value))) {
+        return std::nullopt;
+    }
+
+    return value;
+}
+
+[[nodiscard]] bool SaveDwordValue(
+    const wchar_t* const valueName,
+    const DWORD value) noexcept {
+    if (valueName == nullptr || *valueName == L'\0') {
+        return false;
+    }
+
+    RegistryKey key;
+    if (!CreateWritableSettingsKey(key)) {
+        return false;
+    }
+
+    const LSTATUS writeStatus = ::RegSetValueExW(
+        key.Get(),
+        valueName,
+        0U,
+        REG_DWORD,
+        reinterpret_cast<const BYTE*>(&value),
+        static_cast<DWORD>(sizeof(value)));
+    return writeStatus == ERROR_SUCCESS;
 }
 
 }  // namespace
@@ -159,6 +212,25 @@ std::optional<std::filesystem::path> LoadLastSequenceFolder() noexcept {
 bool SaveLastSequenceFolder(
     const std::filesystem::path& sequenceFolder) noexcept {
     return SavePathValue(kLastSequenceFolderValue, sequenceFolder);
+}
+
+std::optional<int> LoadKeyboardShuttleSpeedPercent() noexcept {
+    const std::optional<DWORD> value =
+        LoadDwordValue(kKeyboardShuttleSpeedPercentValue);
+    if (!value || *value > static_cast<DWORD>(
+            std::numeric_limits<int>::max())) {
+        return std::nullopt;
+    }
+    return static_cast<int>(*value);
+}
+
+bool SaveKeyboardShuttleSpeedPercent(const int percent) noexcept {
+    if (percent < 0) {
+        return false;
+    }
+    return SaveDwordValue(
+        kKeyboardShuttleSpeedPercentValue,
+        static_cast<DWORD>(percent));
 }
 
 }  // namespace zt::sequence::user_settings

@@ -174,6 +174,14 @@ void PlayerUI::Impl::Render(
     }
     ImGui::End();
     ImGui::PopStyleVar(3);
+    if (keyboardShuttleSpeedPersistPending_) {
+        keyboardShuttleSpeedPercent_ =
+            ui_detail::ClampKeyboardShuttleSpeedPercent(
+                keyboardShuttleSpeedPercent_);
+        keyboardShuttleSpeedPersistPending_ = false;
+        static_cast<void>(user_settings::SaveKeyboardShuttleSpeedPercent(
+            keyboardShuttleSpeedPercent_));
+    }
 }
 
 void PlayerUI::Impl::ResetViewportView(const ViewportPane pane) noexcept {
@@ -263,6 +271,13 @@ void PlayerUI::Impl::SynchronizeControls(
     if (!exportSettingsLoaded_) {
         exportSettingsLoaded_ = true;
         exportFolder_ = user_settings::LoadExportFolder();
+    }
+    if (!keyboardShuttleSpeedSettingsLoaded_) {
+        keyboardShuttleSpeedSettingsLoaded_ = true;
+        keyboardShuttleSpeedPercent_ =
+            ui_detail::ClampKeyboardShuttleSpeedPercent(
+                user_settings::LoadKeyboardShuttleSpeedPercent().value_or(
+                    ui_detail::kDefaultKeyboardShuttleSpeedPercent));
     }
     if (!controlsInitialized_) {
         controlsInitialized_ = true;
@@ -461,7 +476,8 @@ void PlayerUI::Impl::HandleKeyboard(
     if (shuttleAction.beginDirection != 0) {
         player.BeginShuttlePlayback(
             shuttleAction.beginDirection,
-            ui_detail::kKeyboardShuttlePlaybackRate);
+            ui_detail::KeyboardShuttlePlaybackRateFromPercent(
+                keyboardShuttleSpeedPercent_));
     }
 }
 

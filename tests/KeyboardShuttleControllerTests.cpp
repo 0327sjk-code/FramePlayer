@@ -1,13 +1,19 @@
 #include "UI/KeyboardShuttleController.h"
 
 #include <iostream>
+#include <limits>
 
 namespace {
 
 using zt::sequence::ui_detail::KeyboardShuttleAction;
 using zt::sequence::ui_detail::KeyboardShuttleController;
 using zt::sequence::ui_detail::KeyboardShuttleInput;
-using zt::sequence::ui_detail::kKeyboardShuttlePlaybackRate;
+using zt::sequence::ui_detail::ClampKeyboardShuttleSpeedPercent;
+using zt::sequence::ui_detail::KeyboardShuttlePlaybackRateFromPercent;
+using zt::sequence::ui_detail::kDefaultKeyboardShuttleSpeedPercent;
+using zt::sequence::ui_detail::kKeyboardShuttleSpeedPercentStep;
+using zt::sequence::ui_detail::kMaximumKeyboardShuttleSpeedPercent;
+using zt::sequence::ui_detail::kMinimumKeyboardShuttleSpeedPercent;
 
 [[nodiscard]] bool Expect(const bool condition, const char* message) {
     if (!condition) {
@@ -156,7 +162,43 @@ using zt::sequence::ui_detail::kKeyboardShuttlePlaybackRate;
 
 }  // namespace
 
-static_assert(kKeyboardShuttlePlaybackRate == 0.80);
+static_assert(kDefaultKeyboardShuttleSpeedPercent == 80);
+static_assert(kMinimumKeyboardShuttleSpeedPercent == 10);
+static_assert(kMaximumKeyboardShuttleSpeedPercent == 100);
+static_assert(kKeyboardShuttleSpeedPercentStep == 5);
+
+static_assert(ClampKeyboardShuttleSpeedPercent(
+    std::numeric_limits<int>::min()) == 10);
+static_assert(ClampKeyboardShuttleSpeedPercent(-1) == 10);
+static_assert(ClampKeyboardShuttleSpeedPercent(0) == 10);
+static_assert(ClampKeyboardShuttleSpeedPercent(9) == 10);
+static_assert(ClampKeyboardShuttleSpeedPercent(10) == 10);
+// Five-point steps put the mathematical midpoint at x.5, which an integer
+// input cannot represent. The adjacent integers verify both sides of the
+// implementation's nearest-step boundary; an exact tie is defined upward.
+static_assert(ClampKeyboardShuttleSpeedPercent(12) == 10);
+static_assert(ClampKeyboardShuttleSpeedPercent(13) == 15);
+static_assert(ClampKeyboardShuttleSpeedPercent(17) == 15);
+static_assert(ClampKeyboardShuttleSpeedPercent(18) == 20);
+static_assert(ClampKeyboardShuttleSpeedPercent(77) == 75);
+static_assert(ClampKeyboardShuttleSpeedPercent(78) == 80);
+static_assert(ClampKeyboardShuttleSpeedPercent(80) == 80);
+static_assert(ClampKeyboardShuttleSpeedPercent(82) == 80);
+static_assert(ClampKeyboardShuttleSpeedPercent(83) == 85);
+static_assert(ClampKeyboardShuttleSpeedPercent(97) == 95);
+static_assert(ClampKeyboardShuttleSpeedPercent(98) == 100);
+static_assert(ClampKeyboardShuttleSpeedPercent(100) == 100);
+static_assert(ClampKeyboardShuttleSpeedPercent(101) == 100);
+static_assert(ClampKeyboardShuttleSpeedPercent(
+    std::numeric_limits<int>::max()) == 100);
+
+static_assert(KeyboardShuttlePlaybackRateFromPercent(10) == 0.10);
+static_assert(KeyboardShuttlePlaybackRateFromPercent(
+    kDefaultKeyboardShuttleSpeedPercent) == 0.80);
+static_assert(KeyboardShuttlePlaybackRateFromPercent(100) == 1.0);
+static_assert(KeyboardShuttlePlaybackRateFromPercent(-1) == 0.10);
+static_assert(KeyboardShuttlePlaybackRateFromPercent(83) == 0.85);
+static_assert(KeyboardShuttlePlaybackRateFromPercent(101) == 1.0);
 
 int main() {
     const bool passed = TestTapAndHold() &&

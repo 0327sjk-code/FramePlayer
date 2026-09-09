@@ -822,8 +822,9 @@ void PlayerUI::Impl::RenderPlaybackControls(
     const UiActions& actions,
     const bool compact) {
     constexpr float kQuickActionsWidth = 484.0F;
-    constexpr float kResourceSettingsWidth = 648.0F;
-    constexpr float kResourceSettingsColumnWidth = 660.0F;
+    constexpr float kResourceSettingsWidth = 876.0F;
+    constexpr float kResourceSettingsColumnWidth = 888.0F;
+    constexpr float kMinimumExportControlsWidth = 512.0F;
     constexpr float kPlaybackSettingsWidth = 206.0F;
     constexpr ImGuiTableFlags tableFlags =
         ImGuiTableFlags_SizingStretchProp |
@@ -911,6 +912,12 @@ void PlayerUI::Impl::RenderPlaybackControls(
 
     ImGui::SetCursorPosY(
         controlsTop + Scale(ui_detail::kBottomBarControlRowStride));
+    const float secondaryRowWidth = ImGui::GetContentRegionAvail().x;
+    const float resourceSettingsColumnWidth = std::min(
+        Scale(kResourceSettingsColumnWidth),
+        std::max(
+            1.0F,
+            secondaryRowWidth - Scale(kMinimumExportControlsWidth)));
     ImGui::PushStyleVar(
         ImGuiStyleVar_CellPadding,
         ImVec2(ImGui::GetStyle().CellPadding.x, 0.0F));
@@ -922,7 +929,7 @@ void PlayerUI::Impl::RenderPlaybackControls(
         ImGui::TableSetupColumn(
             "##ResourceSettings",
             ImGuiTableColumnFlags_WidthFixed,
-            Scale(kResourceSettingsColumnWidth));
+            resourceSettingsColumnWidth);
         ImGui::TableSetupColumn(
             "##ExportControls",
             ImGuiTableColumnFlags_WidthStretch,

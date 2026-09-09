@@ -5,7 +5,7 @@
 
 namespace zt::sequence::user_settings {
 
-// The application persists only lightweight path preferences. Decoded frames
+// The application persists only lightweight user preferences. Decoded frames
 // and image caches remain memory-only.
 [[nodiscard]] std::optional<std::filesystem::path> LoadExportFolder() noexcept;
 
@@ -17,5 +17,10 @@ LoadLastSequenceFolder() noexcept;
 
 [[nodiscard]] bool SaveLastSequenceFolder(
     const std::filesystem::path& sequenceFolder) noexcept;
+
+[[nodiscard]] std::optional<int>
+LoadKeyboardShuttleSpeedPercent() noexcept;
+
+[[nodiscard]] bool SaveKeyboardShuttleSpeedPercent(int percent) noexcept;
 
 }  // namespace zt::sequence::user_settings
