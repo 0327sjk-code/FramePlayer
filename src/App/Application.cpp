@@ -295,7 +295,6 @@ void ShowRuntimeRenderFailure(const std::string& detail) {
 
 int Application::Run(
     const HINSTANCE instance,
-    const int showCommand,
     const UpdateCommandLineOptions& commandLine) {
     ImGui_ImplWin32_EnableDpiAwareness();
 
@@ -423,7 +422,7 @@ int Application::Run(
             return false;
         };
 
-    window.Show(showCommand);
+    window.ShowMaximized();
     bool startupHealthy = true;
     bool pendingUpdateHealth = commandLine.HasCleanupRequest();
     std::jthread updateCleanupThread;

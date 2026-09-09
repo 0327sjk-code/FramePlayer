@@ -19,6 +19,7 @@ using zt::sequence::ui_detail::CalculateBottomBarLogicalLayout;
 using zt::sequence::ui_detail::CalculateTimelineReadyCacheSegments;
 using zt::sequence::ui_detail::FrameFromNormalizedPosition;
 using zt::sequence::ui_detail::FrameTimestampSeconds;
+using zt::sequence::ui_detail::ThirtyFpsFrameNumber;
 using zt::sequence::ui_detail::KeyboardRoutingState;
 using zt::sequence::ui_detail::MemoryBytesFromGiB;
 using zt::sequence::ui_detail::NormalizeTimelineFrame;
@@ -206,7 +207,7 @@ static_assert(!CanOpenLastExportedVideo(true, false, true));
 static_assert(!CanOpenLastExportedVideo(true, true, false));
 
 // Space remains global after frame stepping even when a non-text control keeps
-// ImGui's Active ID. Arrow/Home/End/L routing stays suppressed in that state.
+// ImGui's Active ID. Arrow/Home/End routing stays suppressed in that state.
 inline constexpr KeyboardRoutingState kIdleKeyboardState{
     true, false, false, false, false};
 inline constexpr KeyboardRoutingState kActiveControlKeyboardState{
@@ -228,23 +229,31 @@ static_assert(!ShouldHandlePlaybackHotkey(
 // A simultaneous arrow repeat must never overwrite Space's playback command.
 static_assert(ResolvePlayerHotkeyCommand(
     kIdleKeyboardState,
-    PlayerHotkeyPressState{true, false, true, false, false, false}) ==
+    PlayerHotkeyPressState{true, false, true, false, false}) ==
     PlayerHotkeyCommand::TogglePlayback);
 static_assert(ResolvePlayerHotkeyCommand(
     kActiveControlKeyboardState,
-    PlayerHotkeyPressState{true, true, false, false, false, false}) ==
+    PlayerHotkeyPressState{true, true, false, false, false}) ==
     PlayerHotkeyCommand::TogglePlayback);
 static_assert(ResolvePlayerHotkeyCommand(
     kIdleKeyboardState,
-    PlayerHotkeyPressState{false, true, false, false, false, false}) ==
+    PlayerHotkeyPressState{false, true, false, false, false}) ==
     PlayerHotkeyCommand::StepBackward);
 static_assert(ResolvePlayerHotkeyCommand(
     kIdleKeyboardState,
-    PlayerHotkeyPressState{false, false, true, false, false, false}) ==
+    PlayerHotkeyPressState{false, false, true, false, false}) ==
     PlayerHotkeyCommand::StepForward);
 static_assert(ResolvePlayerHotkeyCommand(
+    kIdleKeyboardState,
+    PlayerHotkeyPressState{false, false, false, true, false}) ==
+    PlayerHotkeyCommand::SeekPlaybackStart);
+static_assert(ResolvePlayerHotkeyCommand(
+    kIdleKeyboardState,
+    PlayerHotkeyPressState{false, false, false, false, true}) ==
+    PlayerHotkeyCommand::SeekPlaybackEnd);
+static_assert(ResolvePlayerHotkeyCommand(
     KeyboardRoutingState{true, false, false, true, true},
-    PlayerHotkeyPressState{true, false, true, false, false, false}) ==
+    PlayerHotkeyPressState{true, false, true, false, false}) ==
     PlayerHotkeyCommand::None);
 
 static_assert(NormalizeDecodePercent(25U) == 25U);
@@ -327,6 +336,18 @@ static_assert(FrameTimestampSeconds(0U, 60.0) == 0.0);
 static_assert(FrameTimestampSeconds(60U, 60.0) == 1.0);
 static_assert(FrameTimestampSeconds(120U, 24.0) == 5.0);
 static_assert(FrameTimestampSeconds(100U, 0.0) == 0.0);
+static_assert(ThirtyFpsFrameNumber(0U, 60.0) == 1);
+static_assert(ThirtyFpsFrameNumber(1U, 60.0) == 1);
+static_assert(ThirtyFpsFrameNumber(2U, 60.0) == 2);
+static_assert(ThirtyFpsFrameNumber(722U, 60.0) == 362);
+static_assert(ThirtyFpsFrameNumber(723U, 60.0) == 362);
+static_assert(ThirtyFpsFrameNumber(724U, 60.0) == 363);
+static_assert(ThirtyFpsFrameNumber(60U, 60.0) == 31);
+static_assert(ThirtyFpsFrameNumber(723U, 30.0) == 724);
+static_assert(ThirtyFpsFrameNumber(24U, 24.0) == 31);
+static_assert(ThirtyFpsFrameNumber(299U, 29.97) == 300);
+static_assert(ThirtyFpsFrameNumber(100U, 0.0) == 0);
+static_assert(ThirtyFpsFrameNumber(100U, -1.0) == 0);
 
 static_assert(ClampPlaybackStartHandle(7U, 5U, 10U) == 5U);
 static_assert(ClampPlaybackStartHandle(3U, 5U, 10U) == 3U);

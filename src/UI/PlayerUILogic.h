@@ -93,6 +93,18 @@ ClampComparisonSequenceFrameOffsetInput(
         : 0.0;
 }
 
+[[nodiscard]] inline constexpr std::int64_t ThirtyFpsFrameNumber(
+    const std::uint32_t zeroBasedFrame,
+    const double sourceFramesPerSecond) noexcept {
+    constexpr double kReferenceFramesPerSecond = 30.0;
+    return sourceFramesPerSecond > 0.0
+        ? static_cast<std::int64_t>(
+            static_cast<double>(zeroBasedFrame) *
+            kReferenceFramesPerSecond /
+            sourceFramesPerSecond) + 1
+        : 0;
+}
+
 struct KeyboardRoutingState final {
     bool hasSource = false;
     bool loading = false;
@@ -107,7 +119,6 @@ struct PlayerHotkeyPressState final {
     bool right = false;
     bool home = false;
     bool end = false;
-    bool loop = false;
 };
 
 enum class PlayerHotkeyCommand : std::uint8_t {
@@ -117,7 +128,6 @@ enum class PlayerHotkeyCommand : std::uint8_t {
     StepForward,
     SeekPlaybackStart,
     SeekPlaybackEnd,
-    ToggleLoop,
 };
 
 // Space is a global playback command. A focused button, slider, timeline, or
@@ -157,9 +167,6 @@ enum class PlayerHotkeyCommand : std::uint8_t {
     }
     if (pressed.end) {
         return PlayerHotkeyCommand::SeekPlaybackEnd;
-    }
-    if (pressed.loop) {
-        return PlayerHotkeyCommand::ToggleLoop;
     }
     return PlayerHotkeyCommand::None;
 }

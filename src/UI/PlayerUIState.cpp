@@ -415,18 +415,17 @@ void PlayerUI::Impl::HandleKeyboard(
         ImGui::IsKeyPressed(ImGuiKey_LeftArrow, false),
         ImGui::IsKeyPressed(ImGuiKey_RightArrow, false),
         ImGui::IsKeyPressed(ImGuiKey_Home, false),
-        ImGui::IsKeyPressed(ImGuiKey_End, false),
-        ImGui::IsKeyPressed(ImGuiKey_L, false)};
+        ImGui::IsKeyPressed(ImGuiKey_End, false)};
 
     ui_detail::PlayerHotkeyPressState routedPresses = pressed;
-    if (pressed.home || pressed.end || pressed.loop) {
+    if (pressed.home || pressed.end) {
         routedPresses.left = false;
         routedPresses.right = false;
     }
     const ui_detail::PlayerHotkeyCommand command =
         ui_detail::ResolvePlayerHotkeyCommand(routingState, routedPresses);
     const bool nonDirectionalCommandPressed = pressed.space || pressed.home ||
-        pressed.end || pressed.loop;
+        pressed.end;
     const ui_detail::KeyboardShuttleInput shuttleInput{
         ui_detail::ShouldHandleNavigationHotkeys(routingState),
         io.AppFocusLost || sourceContextChanged ||
@@ -460,9 +459,6 @@ void PlayerUI::Impl::HandleKeyboard(
     case ui_detail::PlayerHotkeyCommand::SeekPlaybackEnd:
         player.SetPlaying(false);
         player.Seek(snapshot.playbackEndFrame);
-        return;
-    case ui_detail::PlayerHotkeyCommand::ToggleLoop:
-        player.SetLoopPlayback(!snapshot.loopPlayback);
         return;
     case ui_detail::PlayerHotkeyCommand::None:
         break;

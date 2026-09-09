@@ -51,7 +51,7 @@ public:
         std::wstring_view title,
         std::uint32_t logicalWidth,
         std::uint32_t logicalHeight);
-    void Show(int showCommand);
+    void ShowMaximized();
     [[nodiscard]] bool PollEvents(WindowEvents& events);
     void RequestClose();
     void Destroy();

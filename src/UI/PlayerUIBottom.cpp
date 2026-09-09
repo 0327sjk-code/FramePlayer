@@ -25,7 +25,6 @@ using ui_internal::CompactCacheSummary;
 using ui_internal::EllipsizedText;
 using ui_internal::AnimatedButton;
 using ui_internal::AnimatedButtonStyle;
-using ui_internal::AnimatedCheckbox;
 using ui_internal::kColorDanger;
 using ui_internal::kColorExportProgress;
 using ui_internal::kColorMuted;
@@ -45,6 +44,8 @@ using ui_internal::TooltipForLastItem;
 using ui_internal::WithAlpha;
 
 namespace {
+
+inline constexpr float kTimelineMinimumTrackWidth = 80.0F;
 
 [[nodiscard]] bool IsExportBusy(
     const exporting::ExportState state) noexcept {
@@ -219,6 +220,46 @@ struct FrameNumberInputResult final {
         : static_cast<std::int64_t>(frame) + 1;
 }
 
+[[nodiscard]] std::string TimelineValueLabel(
+    const bool hasSource,
+    const std::int64_t currentFrameNumber,
+    const std::size_t totalFrames,
+    const double timestampSeconds,
+    const std::int64_t thirtyFpsFrameNumber) {
+    if (!hasSource) {
+        return "第0/0帧  ·  0.00秒  ·  30FPS 0帧";
+    }
+
+    std::ostringstream label;
+    label << "第" << currentFrameNumber
+          << "/" << totalFrames
+          << "帧  ·  "
+          << std::fixed << std::setprecision(2) << timestampSeconds
+          << "秒  ·  30FPS " << thirtyFpsFrameNumber << "帧";
+    return label.str();
+}
+
+[[nodiscard]] std::string WidestDigitWidthProbe(std::string label) {
+    char digitText[2]{'0', '\0'};
+    char widestDigit = '0';
+    float widestDigitWidth = 0.0F;
+    for (char digit = '0'; digit <= '9'; ++digit) {
+        digitText[0] = digit;
+        const float digitWidth = ImGui::CalcTextSize(digitText).x;
+        if (digitWidth > widestDigitWidth) {
+            widestDigit = digit;
+            widestDigitWidth = digitWidth;
+        }
+    }
+
+    for (char& character : label) {
+        if (character >= '0' && character <= '9') {
+            character = widestDigit;
+        }
+    }
+    return label;
+}
+
 }  // namespace
 
 void PlayerUI::Impl::RenderBottomBar(
@@ -290,6 +331,54 @@ void PlayerUI::Impl::RenderTimeline(
     ComparisonPlayer& player,
     const PlayerSnapshot& snapshot) {
     const float hitHeight = Scale(32.0F);
+    const long long currentFrameNumber = static_cast<long long>(
+        OneBasedFrameNumber(
+            snapshot.currentFrame,
+            snapshot.totalFrames));
+    const double timestampSeconds = ui_detail::FrameTimestampSeconds(
+        snapshot.currentFrame,
+        snapshot.targetFramesPerSecond);
+    const std::int64_t thirtyFpsFrameNumber =
+        ui_detail::ThirtyFpsFrameNumber(
+            snapshot.currentFrame,
+            snapshot.targetFramesPerSecond);
+    const std::string valueLabel = TimelineValueLabel(
+        snapshot.hasSource,
+        currentFrameNumber,
+        snapshot.totalFrames,
+        timestampSeconds,
+        thirtyFpsFrameNumber);
+
+    const FrameIndex finalFrame = snapshot.totalFrames > 0U
+        ? static_cast<FrameIndex>(std::min<std::size_t>(
+            snapshot.totalFrames - 1U,
+            std::numeric_limits<FrameIndex>::max()))
+        : 0U;
+    const std::string maximumValueLabel = TimelineValueLabel(
+        snapshot.hasSource,
+        OneBasedFrameNumber(finalFrame, snapshot.totalFrames),
+        snapshot.totalFrames,
+        ui_detail::FrameTimestampSeconds(
+            finalFrame,
+            snapshot.targetFramesPerSecond),
+        ui_detail::ThirtyFpsFrameNumber(
+            finalFrame,
+            snapshot.targetFramesPerSecond));
+    const std::string valueWidthProbe =
+        WidestDigitWidthProbe(maximumValueLabel);
+    const float stableValueColumnWidth =
+        std::ceil(ImGui::CalcTextSize(valueWidthProbe.c_str()).x);
+    const float tableAvailableWidth = ImGui::GetContentRegionAvail().x;
+    const float innerColumnSpacing =
+        ImGui::GetStyle().CellPadding.x * 2.0F;
+    const float maximumValueColumnWidth = std::max(
+        1.0F,
+        tableAvailableWidth -
+            Scale(kTimelineMinimumTrackWidth) -
+            innerColumnSpacing);
+    const float valueColumnWidth = std::min(
+        stableValueColumnWidth,
+        maximumValueColumnWidth);
     constexpr ImGuiTableFlags tableFlags =
         ImGuiTableFlags_SizingStretchProp |
         ImGuiTableFlags_NoSavedSettings |
@@ -310,12 +399,12 @@ void PlayerUI::Impl::RenderTimeline(
         ImGui::TableSetupColumn(
             "##TimelineValue",
             ImGuiTableColumnFlags_WidthFixed,
-            Scale(248.0F));
+            valueColumnWidth);
         ImGui::TableNextRow(ImGuiTableRowFlags_None, hitHeight);
         ImGui::TableSetColumnIndex(0);
 
         const float trackWidth = std::max(
-            Scale(80.0F),
+            Scale(kTimelineMinimumTrackWidth),
             ImGui::GetContentRegionAvail().x);
         const ImGuiID timelineId = ImGui::GetID("##Timeline");
         static_cast<void>(ImGui::InvisibleButton(
@@ -363,10 +452,6 @@ void PlayerUI::Impl::RenderTimeline(
             : 0.0;
         const float currentX = trackMinimumX +
             usableTrackWidth * static_cast<float>(currentProgress);
-        const long long currentFrameNumber = static_cast<long long>(
-            OneBasedFrameNumber(
-                snapshot.currentFrame,
-                snapshot.totalFrames));
 
         const double readyAheadSeconds =
             snapshot.readyAheadSeconds > 0.0 &&
@@ -515,22 +600,23 @@ void PlayerUI::Impl::RenderTimeline(
         }
 
         ImGui::TableSetColumnIndex(1);
+        const float valueTextWidth = ImGui::CalcTextSize(valueLabel.c_str()).x;
+        ImGui::SetCursorPosX(
+            ImGui::GetCursorPosX() +
+            std::max(
+                0.0F,
+                ImGui::GetContentRegionAvail().x - valueTextWidth));
         ImGui::SetCursorPosY(
             ImGui::GetCursorPosY() +
             std::max(
                 0.0F,
                 (hitHeight - ImGui::GetTextLineHeight()) * 0.5F));
         if (snapshot.hasSource) {
-            const double timestampSeconds = ui_detail::FrameTimestampSeconds(
-                snapshot.currentFrame,
-                snapshot.targetFramesPerSecond);
-            ImGui::Text(
-                "第 %lld / %zu 帧  ·  %.2f 秒",
-                currentFrameNumber,
-                snapshot.totalFrames,
-                timestampSeconds);
+            ImGui::TextUnformatted(valueLabel.c_str());
         } else {
-            ImGui::TextColored(kColorMuted, "第 0 / 0 帧  ·  0.00 秒");
+            ImGui::PushStyleColor(ImGuiCol_Text, kColorMuted);
+            ImGui::TextUnformatted(valueLabel.c_str());
+            ImGui::PopStyleColor();
         }
         ImGui::EndTable();
     }
@@ -825,7 +911,7 @@ void PlayerUI::Impl::RenderPlaybackControls(
     constexpr float kResourceSettingsWidth = 876.0F;
     constexpr float kResourceSettingsColumnWidth = 888.0F;
     constexpr float kMinimumExportControlsWidth = 512.0F;
-    constexpr float kPlaybackSettingsWidth = 206.0F;
+    constexpr float kPlaybackSettingsWidth = 112.0F;
     constexpr ImGuiTableFlags tableFlags =
         ImGuiTableFlags_SizingStretchProp |
         ImGuiTableFlags_NoSavedSettings |
@@ -1013,7 +1099,7 @@ void PlayerUI::Impl::RenderTransportControls(
 
 void PlayerUI::Impl::RenderPlaybackSettings(
     ComparisonPlayer& player,
-    const PlayerSnapshot& snapshot,
+    const PlayerSnapshot& /*snapshot*/,
     const bool exportBusy) {
     ImGui::SetCursorPosY(
         ImGui::GetCursorPosY() +
@@ -1034,15 +1120,6 @@ void PlayerUI::Impl::RenderPlaybackSettings(
     }
     TooltipForLastItem("目标播放帧率，范围 1–120 FPS");
     ImGui::EndDisabled();
-    ImGui::SameLine(0.0F, Scale(14.0F));
-    bool loopPlayback = snapshot.loopPlayback;
-    if (AnimatedCheckbox(
-            interactionAnimator_,
-            "循环",
-            &loopPlayback,
-            Scale(kControlHeight))) {
-        player.SetLoopPlayback(loopPlayback);
-    }
 }
 
 void PlayerUI::Impl::RenderExportControls(

@@ -47,7 +47,7 @@ int WINAPI wWinMain(
     const HINSTANCE instance,
     HINSTANCE,
     PWSTR,
-    const int showCommand) {
+    const int) {
     const zt::sequence::UpdateCommandLineOptions commandLine =
         zt::sequence::ParseUpdateCommandLine();
     if (!commandLine.valid) {
@@ -90,7 +90,7 @@ int WINAPI wWinMain(
     int exitCode = 0;
     try {
         zt::sequence::Application application;
-        exitCode = application.Run(instance, showCommand, commandLine);
+        exitCode = application.Run(instance, commandLine);
     } catch (const std::exception&) {
         ::MessageBoxW(
             nullptr,

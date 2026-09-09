@@ -222,9 +222,12 @@ public:
         return true;
     }
 
-    void Show(const int showCommand) const {
+    void ShowMaximized() const {
         if (windowHandle_ != nullptr) {
-            ::ShowWindow(windowHandle_, showCommand);
+            ::ShowWindow(windowHandle_, SW_SHOWMAXIMIZED);
+            if (::IsZoomed(windowHandle_) == FALSE) {
+                ::ShowWindow(windowHandle_, SW_SHOWMAXIMIZED);
+            }
             ::UpdateWindow(windowHandle_);
         }
     }
@@ -428,9 +431,9 @@ bool Win32Window::Create(
     return impl_ != nullptr && impl_->Create(instance, title, logicalWidth, logicalHeight);
 }
 
-void Win32Window::Show(const int showCommand) {
+void Win32Window::ShowMaximized() {
     if (impl_ != nullptr) {
-        impl_->Show(showCommand);
+        impl_->ShowMaximized();
     }
 }
 
