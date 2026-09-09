@@ -16,19 +16,26 @@ namespace zt::sequence {
 using ui_internal::AnimatedButton;
 using ui_internal::AnimatedButtonStyle;
 using ui_internal::DecodeDescription;
+using ui_internal::kColorInk;
 using ui_internal::kColorMuted;
 using ui_internal::kColorPrimary;
 using ui_internal::kColorSurfaceActive;
+using ui_internal::kColorSurfaceHover;
+using ui_internal::kColorSurfaceRaised;
+using ui_internal::kColorTimelineColdCache;
 using ui_internal::kControlHeight;
+using ui_internal::LerpColor;
 using ui_internal::TooltipForLastItem;
 
 namespace {
 
 inline constexpr float kKeyboardSpeedPreferredControlWidth = 220.0F;
-inline constexpr float kKeyboardSpeedEndpointInset = 11.0F;
-inline constexpr float kKeyboardSpeedTrackCenterY = 11.5F;
-inline constexpr float kKeyboardSpeedTrackHalfHeight = 6.5F;
-inline constexpr float kKeyboardSpeedThumbRadius = 9.0F;
+inline constexpr float kKeyboardSpeedControlRadius = 8.0F;
+inline constexpr float kKeyboardSpeedHorizontalInset = 13.0F;
+inline constexpr float kKeyboardSpeedTrackCenterY = 10.5F;
+inline constexpr float kKeyboardSpeedTrackHalfHeight = 4.5F;
+inline constexpr float kKeyboardSpeedThumbRadius = 7.0F;
+inline constexpr float kKeyboardSpeedTextBottomPadding = 2.0F;
 inline constexpr float kResourceSettingsPreferredWidth = 876.0F;
 inline constexpr float kDecodeComboWidth = 168.0F;
 inline constexpr float kConstrainedDecodeComboWidth = 136.0F;
@@ -43,13 +50,14 @@ struct CapsuleSliderResult final {
 [[nodiscard]] CapsuleSliderResult RenderCapsulePercentageSlider(
     ui::InteractionAnimator& animator,
     const char* const idLabel,
-    const char* const displayLabel,
+    const char* const settingLabel,
+    const char* const valueLabel,
     int& value,
     const ImVec2 size,
     const float uiScale) {
     CapsuleSliderResult result;
-    if (idLabel == nullptr || displayLabel == nullptr || size.x <= 0.0F ||
-        size.y <= 0.0F) {
+    if (idLabel == nullptr || settingLabel == nullptr || valueLabel == nullptr ||
+        size.x <= 0.0F || size.y <= 0.0F) {
         return result;
     }
 
@@ -67,7 +75,7 @@ struct CapsuleSliderResult final {
         maximum.y,
         minimum.y + kKeyboardSpeedTrackCenterY * scale);
     const float endpointInset = std::min(
-        kKeyboardSpeedEndpointInset * scale,
+        kKeyboardSpeedHorizontalInset * scale,
         std::max(0.0F, (size.x - 1.0F) * 0.5F));
     const float trackMinimumX = minimum.x + endpointInset;
     const float trackMaximumX = std::max(
@@ -112,9 +120,22 @@ struct CapsuleSliderResult final {
     const float thumbX = trackMinimumX + trackWidth *
         static_cast<float>(std::clamp(normalizedValue, 0.0, 1.0));
     const float trackHalfHeight =
-        (kKeyboardSpeedTrackHalfHeight + animation.hover * 0.35F) * scale;
+        (kKeyboardSpeedTrackHalfHeight + animation.hover * 0.25F) * scale;
 
     ImDrawList* const drawList = ImGui::GetWindowDrawList();
+    ImVec4 controlFill = LerpColor(
+        kColorSurfaceRaised,
+        kColorSurfaceHover,
+        animation.hover);
+    controlFill = LerpColor(
+        controlFill,
+        kColorSurfaceActive,
+        animation.press);
+    drawList->AddRectFilled(
+        minimum,
+        maximum,
+        ImGui::GetColorU32(controlFill),
+        kKeyboardSpeedControlRadius * scale);
     drawList->AddRectFilled(
         ImVec2(trackMinimumX, centerY - trackHalfHeight),
         ImVec2(trackMaximumX, centerY + trackHalfHeight),
@@ -129,20 +150,30 @@ struct CapsuleSliderResult final {
     }
 
     const float thumbRadius =
-        (kKeyboardSpeedThumbRadius + animation.hover * 0.8F +
-            animation.press * 0.9F) * scale;
+        (kKeyboardSpeedThumbRadius + animation.hover * 0.6F +
+            animation.press * 0.7F) * scale;
     drawList->AddCircleFilled(
         ImVec2(thumbX, centerY),
         thumbRadius,
-        ImGui::GetColorU32(ui_internal::kColorTimelineHotCache),
+        ImGui::GetColorU32(kColorTimelineColdCache),
         24);
-    const ImVec2 labelSize = ImGui::CalcTextSize(displayLabel);
+    const ImVec2 settingLabelSize = ImGui::CalcTextSize(settingLabel);
+    const ImVec2 valueLabelSize = ImGui::CalcTextSize(valueLabel);
+    const float labelY = maximum.y - std::max(
+        settingLabelSize.y,
+        valueLabelSize.y) - kKeyboardSpeedTextBottomPadding * scale;
     drawList->AddText(
         ImVec2(
-            minimum.x + std::max(0.0F, (size.x - labelSize.x) * 0.5F),
-            maximum.y - labelSize.y),
+            minimum.x + endpointInset,
+            labelY),
         ImGui::GetColorU32(kColorMuted),
-        displayLabel);
+        settingLabel);
+    drawList->AddText(
+        ImVec2(
+            maximum.x - endpointInset - valueLabelSize.x,
+            labelY),
+        ImGui::GetColorU32(kColorInk),
+        valueLabel);
     return result;
 }
 
@@ -245,6 +276,7 @@ void PlayerUI::Impl::RenderResourceSettings(
     const PlayerSnapshot& snapshot) {
     const bool constrained = ImGui::GetContentRegionAvail().x <
         Scale(kResourceSettingsPreferredWidth);
+    const float groupSpacing = Scale(constrained ? 8.0F : 12.0F);
     ImGui::PushStyleVar(
         ImGuiStyleVar_FramePadding,
         ImVec2(Scale(10.0F), Scale(10.0F)));
@@ -288,15 +320,15 @@ void PlayerUI::Impl::RenderResourceSettings(
     }
     ImGui::SameLine();
     ImGui::TextColored(kColorMuted, "GB");
-    ImGui::SameLine(0.0F, Scale(12.0F));
+    ImGui::SameLine(0.0F, groupSpacing);
     ImGui::TextColored(kColorMuted, "解码");
     ImGui::SameLine();
     RenderDecodePercent(player, snapshot, constrained);
-    ImGui::SameLine(0.0F, Scale(12.0F));
+    ImGui::SameLine(0.0F, groupSpacing);
     ImGui::TextColored(kColorMuted, "遮罩");
     ImGui::SameLine();
     RenderMaskPreset(constrained);
-    ImGui::SameLine(0.0F, Scale(12.0F));
+    ImGui::SameLine(0.0F, groupSpacing);
     RenderKeyboardShuttleSpeed();
     ImGui::PopStyleVar();
 }
@@ -305,11 +337,11 @@ void PlayerUI::Impl::RenderKeyboardShuttleSpeed() {
     keyboardShuttleSpeedPercent_ =
         ui_detail::ClampKeyboardShuttleSpeedPercent(
             keyboardShuttleSpeedPercent_);
-    std::array<char, 48> speedLabel{};
+    std::array<char, 16> speedValueLabel{};
     static_cast<void>(std::snprintf(
-        speedLabel.data(),
-        speedLabel.size(),
-        "长按速度 %d%%",
+        speedValueLabel.data(),
+        speedValueLabel.size(),
+        "%d%%",
         keyboardShuttleSpeedPercent_));
 
     const float availableWidth = ImGui::GetContentRegionAvail().x;
@@ -319,7 +351,8 @@ void PlayerUI::Impl::RenderKeyboardShuttleSpeed() {
     const CapsuleSliderResult result = RenderCapsulePercentageSlider(
         interactionAnimator_,
         "##KeyboardShuttleSpeed",
-        speedLabel.data(),
+        "方向键播放速度",
+        speedValueLabel.data(),
         keyboardShuttleSpeedPercent_,
         ImVec2(trackWidth, Scale(kControlHeight)),
         uiScale_);
