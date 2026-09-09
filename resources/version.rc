@@ -6,8 +6,8 @@
 IDI_ZT_SEQUENCE_PLAYER ICON "icon.ico"
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,5,0,0
- PRODUCTVERSION 0,5,0,0
+ FILEVERSION 0,5,1,0
+ PRODUCTVERSION 0,5,1,0
  FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
 #ifdef _DEBUG
  FILEFLAGS VS_FF_DEBUG
@@ -23,11 +23,11 @@ BEGIN
         BLOCK "080404B0"
         BEGIN
             VALUE "FileDescription", "序列播放器\0"
-            VALUE "FileVersion", "0.5.0.0\0"
+            VALUE "FileVersion", "0.5.1.0\0"
             VALUE "InternalName", "FramePlayer\0"
             VALUE "OriginalFilename", "FramePlayer.exe\0"
             VALUE "ProductName", "序列播放器\0"
-            VALUE "ProductVersion", "0.5.0.0\0"
+            VALUE "ProductVersion", "0.5.1.0\0"
         END
     END
     BLOCK "VarFileInfo"
