@@ -514,7 +514,8 @@ int Application::Run(
             *secondaryFrameTexture,
             *maskOverlayTexture,
             *exporter,
-            uiActions);
+            uiActions,
+            events.applicationActive);
         ImGui::Render();
 
         const RenderResult beginFrameResult = renderer.BeginFrame();

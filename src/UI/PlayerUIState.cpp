@@ -36,7 +36,8 @@ void PlayerUI::Impl::Render(
     FrameTexture& secondaryFrameTexture,
     overlay::MaskOverlayTexture& maskOverlayTexture,
     exporting::FfmpegExportController& exporter,
-    const UiActions& actions) {
+    const UiActions& actions,
+    const bool applicationActive) {
     interactionAnimator_.BeginFrame(ImGui::GetIO().DeltaTime);
     ComparisonPlayerSnapshot comparisonSnapshot = player.Snapshot();
     PlayerSnapshot snapshot = comparisonSnapshot.primary;
@@ -175,7 +176,13 @@ void PlayerUI::Impl::Render(
             error,
             maskOverlayTexture,
             bottomHeight);
-        HandleKeyboard(player, snapshot, comparisonSnapshot);
+        HandleKeyboard(
+            player,
+            snapshot,
+            comparisonSnapshot,
+            exporter,
+            actions,
+            applicationActive);
     }
     ImGui::End();
     ImGui::PopStyleVar(3);
@@ -417,7 +424,10 @@ void PlayerUI::Impl::UploadDisplayFrame(
 void PlayerUI::Impl::HandleKeyboard(
     ComparisonPlayer& player,
     const PlayerSnapshot& snapshot,
-    const ComparisonPlayerSnapshot& comparisonSnapshot) {
+    const ComparisonPlayerSnapshot& comparisonSnapshot,
+    exporting::FfmpegExportController& exporter,
+    const UiActions& actions,
+    const bool applicationActive) {
     constexpr ImGuiPopupFlags anyPopupFlags =
         ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel;
 
@@ -434,28 +444,74 @@ void PlayerUI::Impl::HandleKeyboard(
     const bool eitherSourceLoading = comparisonSnapshot.primary.loading ||
         comparisonSnapshot.secondary.loading;
     const ui_detail::KeyboardRoutingState routingState{
+        applicationActive,
         snapshot.hasSource,
         eitherSourceLoading,
         ImGui::IsPopupOpen(nullptr, anyPopupFlags),
         io.WantTextInput,
         ImGui::IsAnyItemActive()};
 
+    const bool commandModifiersClear =
+        !io.KeyCtrl && !io.KeyAlt && !io.KeySuper;
+    const bool plainTopRowNumber = commandModifiersClear && !io.KeyShift;
+    const bool unmodifiedEnter = commandModifiersClear && !io.KeyShift &&
+        (ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
+            ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false));
+    const bool playbackStartBrace = commandModifiersClear &&
+        ImGui::IsKeyPressed(ImGuiKey_LeftBracket, false);
+    const bool playbackEndBrace = commandModifiersClear &&
+        ImGui::IsKeyPressed(ImGuiKey_RightBracket, false);
+
     const ui_detail::PlayerHotkeyPressState pressed{
         ImGui::IsKeyPressed(ImGuiKey_Space, false),
         ImGui::IsKeyPressed(ImGuiKey_LeftArrow, false),
         ImGui::IsKeyPressed(ImGuiKey_RightArrow, false),
         ImGui::IsKeyPressed(ImGuiKey_Home, false),
-        ImGui::IsKeyPressed(ImGuiKey_End, false)};
+        ImGui::IsKeyPressed(ImGuiKey_End, false),
+        playbackStartBrace,
+        playbackEndBrace};
+
+    const exporting::ExportState exportState = exporter.Snapshot().state;
+    const bool exportBusy = exportState == exporting::ExportState::Preparing ||
+        exportState == exporting::ExportState::Running ||
+        exportState == exporting::ExportState::Cancelling;
+    const bool hasRememberedSequence = actions.hasCurrentSequence &&
+        actions.hasCurrentSequence();
+    const ui_detail::PlayerActionShortcutRoutingState actionRoutingState{
+        applicationActive,
+        routingState.popupOpen,
+        routingState.wantsTextInput,
+        routingState.anyItemActive,
+        snapshot.loading,
+        static_cast<bool>(actions.openCurrentSequence) &&
+            hasRememberedSequence,
+        snapshot.sourceKind == SourceKind::PngSequence,
+        snapshot.sourceKind == SourceKind::PngSequence ||
+            snapshot.sourceKind == SourceKind::Video,
+        exportBusy};
+    const ui_detail::PlayerActionShortcutPressState actionPresses{
+        plainTopRowNumber && ImGui::IsKeyPressed(ImGuiKey_1, false),
+        plainTopRowNumber && ImGui::IsKeyPressed(ImGuiKey_2, false),
+        plainTopRowNumber && ImGui::IsKeyPressed(ImGuiKey_3, false),
+        unmodifiedEnter,
+        plainTopRowNumber && ImGui::IsKeyPressed(ImGuiKey_4, false)};
+    const ui_detail::PlayerActionShortcutCommand actionCommand =
+        ui_detail::ResolvePlayerActionShortcutCommand(
+            actionRoutingState,
+            actionPresses);
 
     ui_detail::PlayerHotkeyPressState routedPresses = pressed;
-    if (pressed.home || pressed.end) {
+    if (pressed.home || pressed.end || pressed.playbackStartBrace ||
+        pressed.playbackEndBrace) {
         routedPresses.left = false;
         routedPresses.right = false;
     }
     const ui_detail::PlayerHotkeyCommand command =
         ui_detail::ResolvePlayerHotkeyCommand(routingState, routedPresses);
     const bool nonDirectionalCommandPressed = pressed.space || pressed.home ||
-        pressed.end;
+        pressed.end || pressed.playbackStartBrace ||
+        pressed.playbackEndBrace ||
+        actionCommand != ui_detail::PlayerActionShortcutCommand::None;
     const ui_detail::KeyboardShuttleInput shuttleInput{
         ui_detail::ShouldHandleNavigationHotkeys(routingState),
         io.AppFocusLost || sourceContextChanged ||
@@ -491,6 +547,26 @@ void PlayerUI::Impl::HandleKeyboard(
         player.Seek(snapshot.playbackEndFrame);
         return;
     case ui_detail::PlayerHotkeyCommand::None:
+        break;
+    }
+
+    switch (actionCommand) {
+    case ui_detail::PlayerActionShortcutCommand::OpenLastSequence:
+        actions.openCurrentSequence();
+        return;
+    case ui_detail::PlayerActionShortcutCommand::ReloadSequence:
+        ReloadFolder(player);
+        return;
+    case ui_detail::PlayerActionShortcutCommand::ResetViewport:
+        ResetViewportView(activeViewportPane_);
+        return;
+    case ui_detail::PlayerActionShortcutCommand::ExportMp4:
+        StartExport(player, exporter);
+        return;
+    case ui_detail::PlayerActionShortcutCommand::TogglePortraitMask:
+        maskPreset_ = ui::TogglePortraitMaskPreset(maskPreset_);
+        return;
+    case ui_detail::PlayerActionShortcutCommand::None:
         break;
     }
 

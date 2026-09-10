@@ -28,14 +28,16 @@ void PlayerUI::Render(
     FrameTexture& secondaryFrameTexture,
     overlay::MaskOverlayTexture& maskOverlayTexture,
     exporting::FfmpegExportController& exporter,
-    const UiActions& actions) {
+    const UiActions& actions,
+    const bool applicationActive) {
     impl_->Render(
         player,
         primaryFrameTexture,
         secondaryFrameTexture,
         maskOverlayTexture,
         exporter,
-        actions);
+        actions,
+        applicationActive);
 }
 
 bool PlayerUI::IsSecondaryViewportAtClientPoint(

@@ -7,6 +7,7 @@
 #include "UI/InteractionAnimator.h"
 #include "UI/KeyboardShuttleController.h"
 #include "UI/MaskPreset.h"
+#include "UI/PlayerActionShortcuts.h"
 #include "UI/PlayerUI.h"
 #include "UI/ViewportTransform.h"
 
@@ -119,7 +120,8 @@ public:
         FrameTexture& secondaryFrameTexture,
         overlay::MaskOverlayTexture& maskOverlayTexture,
         exporting::FfmpegExportController& exporter,
-        const UiActions& actions);
+        const UiActions& actions,
+        bool applicationActive);
     [[nodiscard]] bool IsSecondaryViewportAtClientPoint(
         std::int32_t clientX,
         std::int32_t clientY) const noexcept;
@@ -328,7 +330,10 @@ private:
     void HandleKeyboard(
         ComparisonPlayer& player,
         const PlayerSnapshot& snapshot,
-        const ComparisonPlayerSnapshot& comparisonSnapshot);
+        const ComparisonPlayerSnapshot& comparisonSnapshot,
+        exporting::FfmpegExportController& exporter,
+        const UiActions& actions,
+        bool applicationActive);
     void OpenFolder(ComparisonPlayer& player, const UiActions& actions);
     void ReloadFolder(ComparisonPlayer& player);
     [[nodiscard]] ErrorView CurrentError(const PlayerSnapshot& snapshot) const;

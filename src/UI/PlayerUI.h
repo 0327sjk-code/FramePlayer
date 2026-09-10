@@ -74,7 +74,8 @@ public:
         FrameTexture& secondaryFrameTexture,
         overlay::MaskOverlayTexture& maskOverlayTexture,
         exporting::FfmpegExportController& exporter,
-        const UiActions& actions);
+        const UiActions& actions,
+        bool applicationActive);
     [[nodiscard]] bool IsSecondaryViewportAtClientPoint(
         std::int32_t clientX,
         std::int32_t clientY) const noexcept;

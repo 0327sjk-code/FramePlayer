@@ -106,6 +106,7 @@ ClampComparisonSequenceFrameOffsetInput(
 }
 
 struct KeyboardRoutingState final {
+    bool applicationActive = false;
     bool hasSource = false;
     bool loading = false;
     bool popupOpen = false;
@@ -119,6 +120,8 @@ struct PlayerHotkeyPressState final {
     bool right = false;
     bool home = false;
     bool end = false;
+    bool playbackStartBrace = false;
+    bool playbackEndBrace = false;
 };
 
 enum class PlayerHotkeyCommand : std::uint8_t {
@@ -134,8 +137,8 @@ enum class PlayerHotkeyCommand : std::uint8_t {
 // viewport scrub region must not suppress it after frame stepping.
 [[nodiscard]] inline constexpr bool ShouldHandlePlaybackHotkey(
     const KeyboardRoutingState& state) noexcept {
-    return state.hasSource && !state.loading && !state.popupOpen &&
-        !state.wantsTextInput;
+    return state.applicationActive && state.hasSource && !state.loading &&
+        !state.popupOpen && !state.wantsTextInput;
 }
 
 // Navigation remains local to an idle, non-editing UI so arrow keys cannot
@@ -162,10 +165,10 @@ enum class PlayerHotkeyCommand : std::uint8_t {
     if (pressed.right) {
         return PlayerHotkeyCommand::StepForward;
     }
-    if (pressed.home) {
+    if (pressed.home || pressed.playbackStartBrace) {
         return PlayerHotkeyCommand::SeekPlaybackStart;
     }
-    if (pressed.end) {
+    if (pressed.end || pressed.playbackEndBrace) {
         return PlayerHotkeyCommand::SeekPlaybackEnd;
     }
     return PlayerHotkeyCommand::None;

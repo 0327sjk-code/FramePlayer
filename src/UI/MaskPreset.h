@@ -41,6 +41,13 @@ inline constexpr std::array<MaskPreset, kMaskPresetCount> kMaskPresets{
     MaskPreset::Opening864x1080,
 };
 
+[[nodiscard]] inline constexpr MaskPreset TogglePortraitMaskPreset(
+    const MaskPreset current) noexcept {
+    return current == MaskPreset::Opening1080x1920
+        ? MaskPreset::None
+        : MaskPreset::Opening1080x1920;
+}
+
 struct MaskPixelSize final {
     std::uint32_t width = kMaskReferenceWidthPixels;
     std::uint32_t height = kMaskReferenceHeightPixels;

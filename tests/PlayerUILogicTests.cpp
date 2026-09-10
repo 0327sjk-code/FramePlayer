@@ -2,6 +2,7 @@
 #include "Overlay/MaskOverlaySpec.h"
 #include "UI/ComparisonCanvasLayout.h"
 #include "UI/MaskPreset.h"
+#include "UI/PlayerActionShortcuts.h"
 #include "UI/PlayerUILogic.h"
 #include "UI/ViewportTransform.h"
 
@@ -29,7 +30,11 @@ using zt::sequence::ui_detail::ResolveActiveDecodePercent;
 using zt::sequence::ui_detail::IsDecodeLoadPending;
 using zt::sequence::ui_detail::PlayerHotkeyCommand;
 using zt::sequence::ui_detail::PlayerHotkeyPressState;
+using zt::sequence::ui_detail::PlayerActionShortcutCommand;
+using zt::sequence::ui_detail::PlayerActionShortcutPressState;
+using zt::sequence::ui_detail::PlayerActionShortcutRoutingState;
 using zt::sequence::ui_detail::ResolvePlayerHotkeyCommand;
+using zt::sequence::ui_detail::ResolvePlayerActionShortcutCommand;
 using zt::sequence::ui_detail::ScrubTargetFrame;
 using zt::sequence::ui_detail::ShouldHandleNavigationHotkeys;
 using zt::sequence::ui_detail::ShouldHandlePlaybackHotkey;
@@ -94,6 +99,7 @@ using zt::sequence::ui::MaskOpeningForPresetAndSource;
 using zt::sequence::ui::MaskOpeningForPresetInDisplay;
 using zt::sequence::ui::MaskPixelSize;
 using zt::sequence::ui::MaskPreset;
+using zt::sequence::ui::TogglePortraitMaskPreset;
 
 [[nodiscard]] constexpr bool NearlyEqual(
     const float first,
@@ -217,22 +223,24 @@ static_assert(!CanOpenLastExportedVideo(true, true, false));
 // Space remains global after frame stepping even when a non-text control keeps
 // ImGui's Active ID. Arrow/Home/End routing stays suppressed in that state.
 inline constexpr KeyboardRoutingState kIdleKeyboardState{
-    true, false, false, false, false};
+    true, true, false, false, false, false};
 inline constexpr KeyboardRoutingState kActiveControlKeyboardState{
-    true, false, false, false, true};
+    true, true, false, false, false, true};
 static_assert(ShouldHandlePlaybackHotkey(kIdleKeyboardState));
 static_assert(ShouldHandleNavigationHotkeys(kIdleKeyboardState));
 static_assert(ShouldHandlePlaybackHotkey(kActiveControlKeyboardState));
 static_assert(!ShouldHandleNavigationHotkeys(kActiveControlKeyboardState));
 
 static_assert(!ShouldHandlePlaybackHotkey(
-    KeyboardRoutingState{false, false, false, false, false}));
+    KeyboardRoutingState{true, false, false, false, false, false}));
 static_assert(!ShouldHandlePlaybackHotkey(
-    KeyboardRoutingState{true, true, false, false, false}));
+    KeyboardRoutingState{true, true, true, false, false, false}));
 static_assert(!ShouldHandlePlaybackHotkey(
-    KeyboardRoutingState{true, false, true, false, false}));
+    KeyboardRoutingState{true, true, false, true, false, false}));
 static_assert(!ShouldHandlePlaybackHotkey(
-    KeyboardRoutingState{true, false, false, true, true}));
+    KeyboardRoutingState{true, true, false, false, true, true}));
+static_assert(!ShouldHandlePlaybackHotkey(
+    KeyboardRoutingState{false, true, false, false, false, false}));
 
 // A simultaneous arrow repeat must never overwrite Space's playback command.
 static_assert(ResolvePlayerHotkeyCommand(
@@ -260,9 +268,64 @@ static_assert(ResolvePlayerHotkeyCommand(
     PlayerHotkeyPressState{false, false, false, false, true}) ==
     PlayerHotkeyCommand::SeekPlaybackEnd);
 static_assert(ResolvePlayerHotkeyCommand(
-    KeyboardRoutingState{true, false, false, true, true},
+    KeyboardRoutingState{true, true, false, false, true, true},
     PlayerHotkeyPressState{true, false, true, false, false}) ==
     PlayerHotkeyCommand::None);
+static_assert(ResolvePlayerHotkeyCommand(
+    kIdleKeyboardState,
+    PlayerHotkeyPressState{
+        false, false, false, false, false, true, false}) ==
+    PlayerHotkeyCommand::SeekPlaybackStart);
+static_assert(ResolvePlayerHotkeyCommand(
+    kIdleKeyboardState,
+    PlayerHotkeyPressState{
+        false, false, false, false, false, false, true}) ==
+    PlayerHotkeyCommand::SeekPlaybackEnd);
+
+inline constexpr PlayerActionShortcutRoutingState kActionShortcutState{
+    true, false, false, false, false, true, true, true, false};
+static_assert(ResolvePlayerActionShortcutCommand(
+    kActionShortcutState,
+    PlayerActionShortcutPressState{true, false, false, false, false}) ==
+    PlayerActionShortcutCommand::OpenLastSequence);
+static_assert(ResolvePlayerActionShortcutCommand(
+    kActionShortcutState,
+    PlayerActionShortcutPressState{false, true, false, false, false}) ==
+    PlayerActionShortcutCommand::ReloadSequence);
+static_assert(ResolvePlayerActionShortcutCommand(
+    kActionShortcutState,
+    PlayerActionShortcutPressState{false, false, true, false, false}) ==
+    PlayerActionShortcutCommand::ResetViewport);
+static_assert(ResolvePlayerActionShortcutCommand(
+    kActionShortcutState,
+    PlayerActionShortcutPressState{false, false, false, true, false}) ==
+    PlayerActionShortcutCommand::ExportMp4);
+static_assert(ResolvePlayerActionShortcutCommand(
+    kActionShortcutState,
+    PlayerActionShortcutPressState{false, false, false, false, true}) ==
+    PlayerActionShortcutCommand::TogglePortraitMask);
+static_assert(ResolvePlayerActionShortcutCommand(
+    PlayerActionShortcutRoutingState{
+        false, false, false, false, false, true, true, true, false},
+    PlayerActionShortcutPressState{true, true, true, true, true}) ==
+    PlayerActionShortcutCommand::None);
+static_assert(ResolvePlayerActionShortcutCommand(
+    PlayerActionShortcutRoutingState{
+        true, false, true, false, false, true, true, true, false},
+    PlayerActionShortcutPressState{true, true, true, true, true}) ==
+    PlayerActionShortcutCommand::None);
+static_assert(ResolvePlayerActionShortcutCommand(
+    PlayerActionShortcutRoutingState{
+        true, false, false, false, true, true, true, true, false},
+    PlayerActionShortcutPressState{true, true, false, true, true}) ==
+    PlayerActionShortcutCommand::TogglePortraitMask);
+
+static_assert(TogglePortraitMaskPreset(MaskPreset::None) ==
+    MaskPreset::Opening1080x1920);
+static_assert(TogglePortraitMaskPreset(MaskPreset::Opening1080x1920) ==
+    MaskPreset::None);
+static_assert(TogglePortraitMaskPreset(MaskPreset::Opening1080x1080) ==
+    MaskPreset::Opening1080x1920);
 
 static_assert(NormalizeDecodePercent(25U) == 25U);
 static_assert(NormalizeDecodePercent(49U) == 50U);
